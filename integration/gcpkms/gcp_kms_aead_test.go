@@ -38,7 +38,7 @@ const (
 )
 
 var (
-	credFile = "tink_go_gcpkms/testdata/credential.json"
+	credFile = "tink_go_gcpkms/testdata/gcp/credential.json"
 )
 
 func init() {
