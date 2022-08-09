@@ -41,7 +41,7 @@ if [[ ! -d "${TINK_BASE_DIR}/tink_go" ]]; then
     "${TINK_BASE_DIR}/tink_go"
 fi
 
-./kokoro/testutils/copy_credentials.sh testdata
+./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 ./kokoro/testutils/update_certs.sh
 # Sourcing required to update callers environment.
 source ./kokoro/testutils/install_go.sh
