@@ -50,14 +50,13 @@ echo "Using go binary from $(which go): $(go version)"
 
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 
-cp WORKSPACE WORKSPACE.bak
-
 # Replace com_github_tink_crypto_tink_go with a local one.
-grep -r "com_github_tink_crypto_tink_go" -l --include="*.bazel" \
-  | xargs sed -i \
+grep -r "com_github_tink_crypto_tink_go" -l --include="*.bazel"  . \
+  | xargs sed -i '.bak' \
       "s~com_github_tink_crypto_tink_go~com_github_tink_crypto_tink_go_local~g"
 
-sed -i 's~workspace(name = "tink_go_gcpkms")~workspace(name = "tink_go_gcpkms")\
+sed -i '.bak' \
+  's~workspace(name = "tink_go_gcpkms")~workspace(name = "tink_go_gcpkms")\
 \
 local_repository(\
     name = "com_github_tink_crypto_tink_go_local",\
