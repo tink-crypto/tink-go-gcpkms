@@ -15,8 +15,7 @@
 ################################################################################
 
 # The user may specify TINK_BASE_DIR as the folder where to look for
-# tink-go-awskms dependencies:
-#   - tink-go.
+# tink-go-gcpkms dependencies.
 
 set -euo pipefail
 
@@ -25,20 +24,13 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
   use_bazel.sh "$(cat .bazelversion)"
 fi
 
-# When running on the Kokoro CI, we expect these folders to exist:
-#
-#  ${KOKORO_ARTIFACTS_DIR}/git/tink_go
-#  ${KOKORO_ARTIFACTS_DIR}/git/tink_go_gcpkms
-#
-# If this is not the case, we are using this script locally for a manual one-off
-# test (running it from the root of a local copy of the tink-go-awskms repo).
-: "${TINK_BASE_DIR:=$(pwd)/..}"
+: "${TINK_BASE_DIR:=$(cd .. && pwd)}"
 
-# If tink-go is not in TINK_BASE_DIR we clone it from GitHub.
-if [[ ! -d "${TINK_BASE_DIR}/tink_go" ]]; then
-  git clone https://github.com/tink-crypto/tink-go.git \
-    "${TINK_BASE_DIR}/tink_go"
-fi
+# Check for dependencies in TINK_BASE_DIR. Any that aren't present will be
+# downloaded.
+readonly GITHUB_ORG="https://github.com/tink-crypto"
+./kokoro/testutils/fetch_git_repo_if_not_present.sh "${TINK_BASE_DIR}" \
+  "${GITHUB_ORG}/tink-go"
 
 # Sourcing required to update callers environment.
 source ./kokoro/testutils/install_go.sh
