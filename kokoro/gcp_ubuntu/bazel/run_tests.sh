@@ -20,7 +20,8 @@
 set -euo pipefail
 
 if [[ -n "${KOKORO_ROOT:-}" ]]; then
-  cd "${KOKORO_ARTIFACTS_DIR}/git/tink_go_gcpkms"
+  TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
+  cd "${TINK_BASE_DIR}/tink_go_gcpkms"
   use_bazel.sh "$(cat .bazelversion)"
 fi
 

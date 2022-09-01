@@ -21,7 +21,8 @@ set -euo pipefail
 
 TINK_GO_GCPKMS_PROJECT_PATH="$(pwd)"
 if [[ -n "${KOKORO_ROOT:-}" ]]; then
-  TINK_GO_GCPKMS_PROJECT_PATH="${KOKORO_ARTIFACTS_DIR}/git/tink_go_gcpkms"
+  TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
+  TINK_GO_GCPKMS_PROJECT_PATH="${TINK_BASE_DIR}/tink_go_gcpkms"
   cd "${TINK_GO_GCPKMS_PROJECT_PATH}"
 fi
 readonly TINK_GO_GCPKMS_PROJECT_PATH
