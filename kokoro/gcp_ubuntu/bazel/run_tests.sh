@@ -64,6 +64,7 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
 fi
 readonly MANUAL_TARGETS
 
-./kokoro/testutils/run_bazel_tests.sh . "${MANUAL_TARGETS[@]}"
+#./kokoro/testutils/run_bazel_tests.sh . "${MANUAL_TARGETS[@]}"
+./kokoro/testutils/run_bazel_tests.sh .
 
 mv WORKSPACE.bak WORKSPACE
