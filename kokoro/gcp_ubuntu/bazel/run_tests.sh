@@ -22,7 +22,8 @@ set -euo pipefail
 if [[ -n "${KOKORO_ROOT:-}" ]]; then
   TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
   cd "${TINK_BASE_DIR}/tink_go_gcpkms"
-  use_bazel.sh "$(cat .bazelversion)"
+  chmod +x "${KOKORO_GFILE_DIR}/use_bazel.sh"
+  "${KOKORO_GFILE_DIR}/use_bazel.sh" "$(cat .bazelversion)"
 fi
 
 : "${TINK_BASE_DIR:=$(cd .. && pwd)}"
@@ -32,9 +33,6 @@ fi
 readonly GITHUB_ORG="https://github.com/tink-crypto"
 ./kokoro/testutils/fetch_git_repo_if_not_present.sh "${TINK_BASE_DIR}" \
   "${GITHUB_ORG}/tink-go"
-
-# Sourcing required to update callers environment.
-source ./kokoro/testutils/install_go.sh
 
 echo "Using go binary from $(which go): $(go version)"
 
