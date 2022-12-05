@@ -22,8 +22,6 @@ set -euo pipefail
 if [[ -n "${KOKORO_ROOT:-}" ]]; then
   TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
   cd "${TINK_BASE_DIR}/tink_go_gcpkms"
-  chmod +x "${KOKORO_GFILE_DIR}/use_bazel.sh"
-  "${KOKORO_GFILE_DIR}/use_bazel.sh" "$(cat .bazelversion)"
 fi
 
 : "${TINK_BASE_DIR:=$(cd .. && pwd)}"
@@ -38,7 +36,6 @@ echo "Using go binary from $(which go): $(go version)"
 
 # TODO(b/238389921): Run check_go_generated_files_up_to_date.sh after a
 # refactoring that takes into account extensions to tink-go.
-
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 
 cp WORKSPACE WORKSPACE.bak
