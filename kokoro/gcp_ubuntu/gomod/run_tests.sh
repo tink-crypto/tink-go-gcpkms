@@ -36,7 +36,6 @@ readonly GITHUB_ORG="https://github.com/tink-crypto"
   "${GITHUB_ORG}/tink-go"
 
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
-./kokoro/testutils/update_certs.sh
 
 echo "Using go binary from $(which go): $(go version)"
 
