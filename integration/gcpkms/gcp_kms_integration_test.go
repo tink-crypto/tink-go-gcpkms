@@ -57,7 +57,7 @@ func setupKMS(t *testing.T) {
 
 	g, err := gcpkms.NewClientWithCredentials(keyURI, filepath.Join(srcDir, credFile))
 	if err != nil {
-		t.Errorf("error setting up gcp client: %v", err)
+		t.Fatalf("error setting up GCP client: %v", err)
 	}
 	registry.RegisterKMSClient(g)
 }
