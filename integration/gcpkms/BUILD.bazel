@@ -17,8 +17,6 @@ go_library(
         "@com_github_tink_crypto_tink_go//tink",
         "@org_golang_google_api//cloudkms/v1:cloudkms",
         "@org_golang_google_api//option",
-        "@org_golang_x_oauth2//:oauth2",
-        "@org_golang_x_oauth2//google",
     ],
 )
 
@@ -44,6 +42,7 @@ go_test(
         "@com_github_tink_crypto_tink_go//keyset",
         "@com_github_tink_crypto_tink_go//subtle/random",
         "@com_github_tink_crypto_tink_go//tink",
+        "@org_golang_google_api//option",
     ],
 )
 

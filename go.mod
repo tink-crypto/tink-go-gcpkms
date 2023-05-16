@@ -4,7 +4,6 @@ go 1.17
 
 require (
 	github.com/tink-crypto/tink-go v0.0.0-20220624212543-8c6867ec787f
-	golang.org/x/oauth2 v0.5.0
 	google.golang.org/api v0.86.0
 )
 
@@ -18,6 +17,7 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.6.0 // indirect
 	golang.org/x/net v0.6.0 // indirect
+	golang.org/x/oauth2 v0.5.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect
 	golang.org/x/text v0.7.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
