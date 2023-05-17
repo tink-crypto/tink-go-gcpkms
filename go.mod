@@ -1,6 +1,6 @@
 module github.com/tink-crypto/tink-go-gcpkms
 
-go 1.17
+go 1.19
 
 require (
 	github.com/tink-crypto/tink-go v0.0.0-20220624212543-8c6867ec787f
