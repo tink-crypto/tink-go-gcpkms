@@ -14,25 +14,45 @@
 # limitations under the License.
 ################################################################################
 
+# By default when run locally this script runs the command below directly on the
+# host. The CONTAINER_IMAGE variable can be set to run on a custom container
+# image for local testing. E.g.:
+#
+# CONTAINER_IMAGE="gcr.io/tink-test-infrastructure/linux-tink-go-base:latest" \
+#  sh ./kokoro/gcp_ubuntu/bazel/run_tests.sh
+#
 # The user may specify TINK_BASE_DIR as the folder where to look for
-# tink-go-gcpkms dependencies.
-
+# tink-go-gcpkms and its dependencies. That is:
+#   ${TINK_BASE_DIR}/tink_go
+#   ${TINK_BASE_DIR}/tink_go_gcpkms
+# NOTE: tink_go is fetched from GitHub if not found.
 set -euo pipefail
 
-if [[ -n "${KOKORO_ROOT:-}" ]]; then
+RUN_COMMAND_ARGS=()
+if [[ -n "${KOKORO_ARTIFACTS_DIR:-}" ]]; then
   TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
-  cd "${TINK_BASE_DIR}/tink_go_gcpkms"
+  readonly C_PREFIX="us-docker.pkg.dev/tink-test-infrastructure/tink-ci-images"
+  readonly C_NAME="linux-tink-go-base"
+  readonly C_HASH="2fddb51977a951759ab3b87643b672d590f277fe6ade5787fa8721dd91ea839a"
+  CONTAINER_IMAGE="${C_PREFIX}/${C_NAME}@sha256:${C_HASH}"
+  RUN_COMMAND_ARGS+=( -k "${TINK_GCR_SERVICE_KEY}" )
 fi
-
 : "${TINK_BASE_DIR:=$(cd .. && pwd)}"
+readonly TINK_BASE_DIR
+readonly CONTAINER_IMAGE
+
+# If running from the tink_go_gcpkms folder this has no effect.
+cd "${TINK_BASE_DIR}/tink_go_gcpkms"
+
+if [[ -n "${CONTAINER_IMAGE:-}" ]]; then
+  RUN_COMMAND_ARGS+=( -c "${CONTAINER_IMAGE}" )
+fi
 
 # Check for dependencies in TINK_BASE_DIR. Any that aren't present will be
 # downloaded.
 readonly GITHUB_ORG="https://github.com/tink-crypto"
 ./kokoro/testutils/fetch_git_repo_if_not_present.sh "${TINK_BASE_DIR}" \
   "${GITHUB_ORG}/tink-go"
-
-echo "Using go binary from $(which go): $(go version)"
 
 # TODO(b/238389921): Run check_go_generated_files_up_to_date.sh after a
 # refactoring that takes into account extensions to tink-go.
@@ -49,7 +69,7 @@ sed -i 's~workspace(name = "tink_go_gcpkms")~workspace(name = "tink_go_gcpkms")\
 \
 local_repository(\
     name = "com_github_tink_crypto_tink_go_local",\
-    path = "'"${TINK_BASE_DIR}"'/tink_go",\
+    path = "../tink_go",\
 )~' WORKSPACE
 
 MANUAL_TARGETS=()
@@ -59,6 +79,7 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
 fi
 readonly MANUAL_TARGETS
 
-./kokoro/testutils/run_bazel_tests.sh . "${MANUAL_TARGETS[@]}"
+./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
+  ./kokoro/testutils/run_bazel_tests.sh . "${MANUAL_TARGETS[@]}"
 
 mv WORKSPACE.bak WORKSPACE
