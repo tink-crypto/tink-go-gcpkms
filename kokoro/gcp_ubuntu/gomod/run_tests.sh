@@ -65,6 +65,7 @@ cp go.mod go.mod.bak
 # Modify go.mod locally to use the version of tink-go in ../tink_go.
 ./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
   go mod edit "-replace=${TINK_GO_MODULE_URL}=../tink_go" \
+  "&&" go mod tidy \
   "&&" go list -m all "|" grep tink-go \
   "&&" ./kokoro/testutils/run_go_mod_tests.sh "${TINK_GO_GCPKMS_MODULE_URL}" . \
     "${TINK_VERSION}"  "main"
