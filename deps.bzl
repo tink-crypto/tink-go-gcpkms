@@ -2,7 +2,7 @@
 
 load("@bazel_gazelle//:deps.bzl", "go_repository")
 
-# NOTE: Use third_party/tink/tools/update_go_build.sh to update dependencies.
+# Placeholder for internal instructions to autogenerate dependencies.
 def tink_go_gcpkms_dependencies():
     """Loads Tink Go Google Cloud KMS dependencies.
 
