@@ -45,10 +45,6 @@ http_archive(
     sha256 = "5babb8571f1cceafe0c18e13ddb3be556e87e12ceea3463d6b0d0064e6cc1ac3",
 )
 
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-
-protobuf_deps()
-
 # -------------------------------------------------------------------------
 # Wycheproof.
 # -------------------------------------------------------------------------
@@ -63,20 +59,13 @@ http_archive(
 # -------------------------------------------------------------------------
 # Bazel rules for Go.
 # -------------------------------------------------------------------------
-# Release from 2022-12-06
-#
-# NOTE: This version was chosen because since 0.38 this requires
-# org_golang_x_tools v0.5.0 [1], while Tink imports v0.1.12. io_bazel_rules_go
-# v0.37.0 is compatible with v0.1.12 [2].
-#
-# [1] https://github.com/bazelbuild/rules_go/blob/cf78385a58e278b542511d246bb1cef287d528e9/go/private/repositories.bzl#L73
-# [2] https://github.com/bazelbuild/rules_go/blob/2a0f48241cf5a4838b9ccfde228863d75d6c646e/go/private/repositories.bzl#L73
+# Release from 2023-04-20
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "56d8c5a5c91e1af73eca71a6fab2ced959b67c86d12ba37feedb0a2dfea441a6",
+    sha256 = "6dc2da7ab4cf5d7bfc7c949776b1b7c733f05e56edc4bcd9022bb249d2e2a996",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.37.0/rules_go-v0.37.0.zip",
-        "https://github.com/bazelbuild/rules_go/releases/download/v0.37.0/rules_go-v0.37.0.zip",
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.39.1/rules_go-v0.39.1.zip",
+        "https://github.com/bazelbuild/rules_go/releases/download/v0.39.1/rules_go-v0.39.1.zip",
     ],
 )
 
@@ -93,17 +82,21 @@ http_archive(
     ],
 )
 
-load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
-
-go_rules_dependencies()
-
-load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
+load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 # Tink Go Google Cloud KMS Deps.
 load("//:deps.bzl", "tink_go_gcpkms_dependencies")
 
+load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
+
+load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
+
+protobuf_deps()
+
 # gazelle:repository_macro deps.bzl%tink_go_gcpkms_dependencies
 tink_go_gcpkms_dependencies()
+
+go_rules_dependencies()
 
 go_register_toolchains(
     nogo = "@//:tink_nogo",
