@@ -26,7 +26,7 @@
 #   ${TINK_BASE_DIR}/tink_go
 #   ${TINK_BASE_DIR}/tink_go_gcpkms
 # NOTE: tink_go is fetched from GitHub if not found.
-set -euo pipefail
+set -eEuo pipefail
 
 RUN_COMMAND_ARGS=()
 if [[ -n "${KOKORO_ROOT:-}" ]]; then
@@ -62,12 +62,24 @@ readonly TINK_VERSION="$(cat version.bzl | grep ^TINK | cut -f 2 -d \")"
 
 cp go.mod go.mod.bak
 
-# Modify go.mod locally to use the version of tink-go in ../tink_go.
-./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
-  go mod edit "-replace=${TINK_GO_MODULE_URL}=../tink_go" \
-  "&&" go mod tidy \
-  "&&" go list -m all "|" grep tink-go \
-  "&&" ./kokoro/testutils/run_go_mod_tests.sh "${TINK_GO_GCPKMS_MODULE_URL}" . \
-    "${TINK_VERSION}"  "main"
+cat <<EOF > _do_run_test.sh
+set -euo pipefail
 
-mv go.mod.bak go.mod
+# Modify go.mod locally to use the version of tink-go in ../tink_go.
+go mod edit "-replace=${TINK_GO_MODULE_URL}=../tink_go"
+go mod tidy
+go list -m all | grep tink-go
+./kokoro/testutils/run_go_mod_tests.sh "${TINK_GO_GCPKMS_MODULE_URL}" . \
+  "${TINK_VERSION}" "main"
+EOF
+chmod +x _do_run_test.sh
+
+# Run cleanup on EXIT.
+trap cleanup EXIT
+
+cleanup() {
+  mv go.mod.bak go.mod
+  rm -rf _do_run_test.sh
+}
+
+./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" ./_do_run_test.sh
