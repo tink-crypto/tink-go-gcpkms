@@ -61,16 +61,27 @@ readonly GITHUB_ORG="https://github.com/tink-crypto"
 cp WORKSPACE WORKSPACE.bak
 
 # Replace com_github_tink_crypto_tink_go with a local one.
-grep -r "com_github_tink_crypto_tink_go" -l --include="*.bazel" \
-  | xargs sed -i \
-      "s~com_github_tink_crypto_tink_go~com_github_tink_crypto_tink_go_local~g"
-
-sed -i 's~workspace(name = "tink_go_gcpkms")~workspace(name = "tink_go_gcpkms")\
-\
+mapfile -d '' TINK_GO_LOCAL_REPO <<'EOF'
 local_repository(\
-    name = "com_github_tink_crypto_tink_go_local",\
+    name = "com_github_tink_crypto_tink_go",\
     path = "../tink_go",\
-)~' WORKSPACE
+)\
+EOF
+readonly TINK_GO_LOCAL_REPO
+
+mapfile -d '' TINK_GO_DEPENDENCIES <<'EOF'
+load("@com_github_tink_crypto_tink_go//:deps.bzl", tink_go_dependencies="go_dependencies")\
+\
+tink_go_dependencies()\
+EOF
+readonly TINK_GO_DEPENDENCIES
+
+sed -i \
+  "s~# Placeholder for tink-go http_archive or local_repository.~${TINK_GO_LOCAL_REPO}~" \
+  WORKSPACE
+sed -i \
+  "s~# Placeholder for tink-go dependencies.~${TINK_GO_DEPENDENCIES}~"\
+  WORKSPACE
 
 MANUAL_TARGETS=()
 # Run manual tests that rely on test data only available via Bazel.
@@ -79,7 +90,11 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
 fi
 readonly MANUAL_TARGETS
 
+trap cleanup EXIT
+
+cleanup() {
+  mv WORKSPACE.bak WORKSPACE
+}
+
 ./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
   ./kokoro/testutils/run_bazel_tests.sh . "${MANUAL_TARGETS[@]}"
-
-mv WORKSPACE.bak WORKSPACE
