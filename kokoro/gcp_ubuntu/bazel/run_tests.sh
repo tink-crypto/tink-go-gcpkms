@@ -97,4 +97,5 @@ cleanup() {
 }
 
 ./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
-  ./kokoro/testutils/run_bazel_tests.sh . "${MANUAL_TARGETS[@]}"
+  ./kokoro/testutils/run_bazel_tests.sh \
+    -t --test_arg=--test.v . "${MANUAL_TARGETS[@]}"
