@@ -56,7 +56,7 @@ readonly GITHUB_ORG="https://github.com/tink-crypto"
 
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 
-readonly TINK_GO_MODULE_URL="github.com/tink-crypto/tink-go"
+readonly TINK_GO_MODULE_URL="github.com/tink-crypto/tink-go/v2"
 readonly TINK_GO_GCPKMS_MODULE_URL="github.com/tink-crypto/tink-go-gcpkms"
 readonly TINK_VERSION="$(cat version.bzl | grep ^TINK | cut -f 2 -d \")"
 

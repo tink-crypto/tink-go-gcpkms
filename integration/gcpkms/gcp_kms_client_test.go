@@ -21,10 +21,10 @@ import (
 	"log"
 
 	"google.golang.org/api/option"
-	"github.com/tink-crypto/tink-go/aead"
-	"github.com/tink-crypto/tink-go/core/registry"
+	"github.com/tink-crypto/tink-go/v2/aead"
+	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go-gcpkms/integration/gcpkms"
-	"github.com/tink-crypto/tink-go/keyset"
+	"github.com/tink-crypto/tink-go/v2/keyset"
 )
 
 func Example() {

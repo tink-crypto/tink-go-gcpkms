@@ -27,8 +27,8 @@ import (
 
 	"google.golang.org/api/cloudkms/v1"
 	"google.golang.org/api/option"
-	"github.com/tink-crypto/tink-go/core/registry"
-	"github.com/tink-crypto/tink-go/tink"
+	"github.com/tink-crypto/tink-go/v2/core/registry"
+	"github.com/tink-crypto/tink-go/v2/tink"
 )
 
 const (
