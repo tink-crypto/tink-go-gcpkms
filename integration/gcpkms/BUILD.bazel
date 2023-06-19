@@ -10,7 +10,7 @@ go_library(
         "gcp_kms_aead.go",
         "gcp_kms_client.go",
     ],
-    importpath = "github.com/tink-crypto/tink-go-gcpkms/integration/gcpkms",
+    importpath = "github.com/tink-crypto/tink-go-gcpkms/v2/integration/gcpkms",
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_tink_crypto_tink_go//core/registry",

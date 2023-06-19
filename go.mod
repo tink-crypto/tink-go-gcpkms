@@ -1,4 +1,4 @@
-module github.com/tink-crypto/tink-go-gcpkms
+module github.com/tink-crypto/tink-go-gcpkms/v2
 
 go 1.19
 

@@ -23,7 +23,7 @@ import (
 	"google.golang.org/api/option"
 	"github.com/tink-crypto/tink-go/v2/aead"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
-	"github.com/tink-crypto/tink-go-gcpkms/integration/gcpkms"
+	"github.com/tink-crypto/tink-go-gcpkms/v2/integration/gcpkms"
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
 
