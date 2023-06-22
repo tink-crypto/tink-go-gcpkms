@@ -13,8 +13,8 @@ go_library(
     importpath = "github.com/tink-crypto/tink-go-gcpkms/v2/integration/gcpkms",
     visibility = ["//visibility:public"],
     deps = [
-        "@com_github_tink_crypto_tink_go//core/registry",
-        "@com_github_tink_crypto_tink_go//tink",
+        "@com_github_tink_crypto_tink_go_v2//core/registry",
+        "@com_github_tink_crypto_tink_go_v2//tink",
         "@org_golang_google_api//cloudkms/v1:cloudkms",
         "@org_golang_google_api//option",
     ],
@@ -37,11 +37,11 @@ go_test(
     tags = ["manual"],
     deps = [
         ":gcpkms",
-        "@com_github_tink_crypto_tink_go//aead",
-        "@com_github_tink_crypto_tink_go//core/registry",
-        "@com_github_tink_crypto_tink_go//keyset",
-        "@com_github_tink_crypto_tink_go//subtle/random",
-        "@com_github_tink_crypto_tink_go//tink",
+        "@com_github_tink_crypto_tink_go_v2//aead",
+        "@com_github_tink_crypto_tink_go_v2//core/registry",
+        "@com_github_tink_crypto_tink_go_v2//keyset",
+        "@com_github_tink_crypto_tink_go_v2//subtle/random",
+        "@com_github_tink_crypto_tink_go_v2//tink",
         "@org_golang_google_api//option",
     ],
 )

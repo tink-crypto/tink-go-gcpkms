@@ -60,17 +60,17 @@ readonly GITHUB_ORG="https://github.com/tink-crypto"
 
 cp WORKSPACE WORKSPACE.bak
 
-# Replace com_github_tink_crypto_tink_go with a local one.
+# Replace com_github_tink_crypto_tink_go_v2 with a local one.
 mapfile -d '' TINK_GO_LOCAL_REPO <<'EOF'
 local_repository(\
-    name = "com_github_tink_crypto_tink_go",\
+    name = "com_github_tink_crypto_tink_go_v2",\
     path = "../tink_go",\
 )\
 EOF
 readonly TINK_GO_LOCAL_REPO
 
 mapfile -d '' TINK_GO_DEPENDENCIES <<'EOF'
-load("@com_github_tink_crypto_tink_go//:deps.bzl", tink_go_dependencies="go_dependencies")\
+load("@com_github_tink_crypto_tink_go_v2//:deps.bzl", tink_go_dependencies="go_dependencies")\
 \
 tink_go_dependencies()\
 EOF
