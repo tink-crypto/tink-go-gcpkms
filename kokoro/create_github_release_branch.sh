@@ -47,9 +47,9 @@ fi
 
 GITHUB_RELEASE_UTIL_OPTS=()
 if [[ "${IS_KOKORO}" == "true" ]] ; then
-  # Note: KOKORO_GIT_COMMIT is populated by Kokoro.
+  # Note: KOKORO_GIT_COMMIT_tink_go_gcpkms is populated by Kokoro.
   GITHUB_RELEASE_UTIL_OPTS+=(
-    -c "${KOKORO_GIT_COMMIT}"
+    -c "${KOKORO_GIT_COMMIT_tink_go_gcpkms}"
     -t "${GITHUB_ACCESS_TOKEN}"
   )
 fi
