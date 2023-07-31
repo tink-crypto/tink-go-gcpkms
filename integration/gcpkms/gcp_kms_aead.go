@@ -18,7 +18,6 @@ package gcpkms
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"hash/crc32"
 
@@ -47,23 +46,14 @@ func newGCPAEAD(keyURI string, kms *kms.KeyManagementClient) tink.AEAD {
 
 // Encrypt encrypts the plaintext with associatedData.
 func (a *gcpAEAD) Encrypt(plaintext, associatedData []byte) ([]byte, error) {
-
-	var (
-		plaintextBase64      []byte
-		associatedDataBase64 []byte
-		ciphertext           []byte
-	)
-
-	base64.URLEncoding.Encode(plaintext, plaintextBase64)
-	base64.URLEncoding.Encode(associatedData, associatedDataBase64)
-	plaintextCRC32C := crc32c(plaintextBase64)
-	associatedDataCRC32C := crc32c(associatedDataBase64)
+	plaintextCRC32C := crc32c(plaintext)
+	associatedDataCRC32C := crc32c(associatedData)
 
 	req := &kmspb.EncryptRequest{
 		Name:                              a.keyURI,
-		Plaintext:                         plaintextBase64,
+		Plaintext:                         plaintext,
 		PlaintextCrc32C:                   wrapperspb.Int64(int64(plaintextCRC32C)),
-		AdditionalAuthenticatedData:       associatedDataBase64,
+		AdditionalAuthenticatedData:       associatedData,
 		AdditionalAuthenticatedDataCrc32C: wrapperspb.Int64(int64(associatedDataCRC32C)),
 	}
 
@@ -81,33 +71,19 @@ func (a *gcpAEAD) Encrypt(plaintext, associatedData []byte) ([]byte, error) {
 		return nil, errors.New("Encrypt: response corrupted in-transit")
 	}
 
-	_, err = base64.StdEncoding.Decode(resp.Ciphertext, ciphertext)
-	if err != nil {
-		return nil, err
-	}
-
-	return ciphertext, nil
+	return resp.Ciphertext, nil
 }
 
 // Decrypt decrypts ciphertext with with associatedData.
 func (a *gcpAEAD) Decrypt(ciphertext, associatedData []byte) ([]byte, error) {
-
-	var (
-		ciphertextBase64     []byte
-		associatedDataBase64 []byte
-		plaintext            []byte
-	)
-
-	base64.URLEncoding.Encode(ciphertext, ciphertextBase64)
-	base64.URLEncoding.Encode(associatedData, associatedDataBase64)
-	ciphertextCRC32C := crc32c(ciphertextBase64)
-	associatedDataCRC32C := crc32c(associatedDataBase64)
+	ciphertextCRC32C := crc32c(ciphertext)
+	associatedDataCRC32C := crc32c(associatedData)
 
 	req := &kmspb.DecryptRequest{
 		Name:                              a.keyURI,
 		Ciphertext:                        ciphertext,
 		CiphertextCrc32C:                  wrapperspb.Int64(int64(ciphertextCRC32C)),
-		AdditionalAuthenticatedData:       associatedDataBase64,
+		AdditionalAuthenticatedData:       associatedData,
 		AdditionalAuthenticatedDataCrc32C: wrapperspb.Int64(int64(associatedDataCRC32C)),
 	}
 
@@ -122,12 +98,7 @@ func (a *gcpAEAD) Decrypt(ciphertext, associatedData []byte) ([]byte, error) {
 		return nil, errors.New("Decrypt: response corrupted in-transit")
 	}
 
-	_, err = base64.StdEncoding.Decode(resp.Plaintext, plaintext)
-	if err != nil {
-		return nil, err
-	}
-
-	return plaintext, nil
+	return resp.Plaintext, nil
 }
 
 // Compute text's CRC32C.
