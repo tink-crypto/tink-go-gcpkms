@@ -25,10 +25,11 @@ import (
 	"runtime"
 	"strings"
 
-	"google.golang.org/api/cloudkms/v1"
-	"google.golang.org/api/option"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/tink"
+	"google.golang.org/api/option"
+
+	kms "cloud.google.com/go/kms/apiv1"
 )
 
 const (
@@ -36,14 +37,14 @@ const (
 )
 
 var (
-	errCred       = errors.New("invalid credential path")
+	// errCred       = errors.New("invalid credential path")
 	tinkUserAgent = "Tink/" + tink.Version + " Golang/" + runtime.Version()
 )
 
 // gcpClient represents a client that connects to the GCP KMS backend.
 type gcpClient struct {
 	keyURIPrefix string
-	kms          *cloudkms.Service
+	kms          *kms.KeyManagementClient
 }
 
 var _ registry.KMSClient = (*gcpClient)(nil)
@@ -57,14 +58,14 @@ func NewClientWithOptions(ctx context.Context, uriPrefix string, opts ...option.
 	}
 
 	opts = append(opts, option.WithUserAgent(tinkUserAgent))
-	kmsService, err := cloudkms.NewService(ctx, opts...)
+	client, err := kms.NewKeyManagementClient(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	return &gcpClient{
 		keyURIPrefix: uriPrefix,
-		kms:          kmsService,
+		kms:          client,
 	}, nil
 }
 
