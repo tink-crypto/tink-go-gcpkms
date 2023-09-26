@@ -14,71 +14,37 @@
 # limitations under the License.
 ################################################################################
 
-# By default when run locally this script runs the command below directly on the
-# host. The CONTAINER_IMAGE variable can be set to run on a custom container
-# image for local testing. E.g.:
+# Builds and tests tink-go-gcpkms using Go tooling.
 #
-# CONTAINER_IMAGE="gcr.io/tink-test-infrastructure/linux-tink-go-base:latest" \
-#  sh ./kokoro/gcp_ubuntu/gomod/run_tests.sh
+# The behavior of this script can be modified using the following optional env
+# variables:
 #
-# The user may specify TINK_BASE_DIR as the folder where to look for
-# tink-go-gcpkms and its dependencies. That is:
-#   ${TINK_BASE_DIR}/tink_go
-#   ${TINK_BASE_DIR}/tink_go_gcpkms
-# NOTE: tink_go is fetched from GitHub if not found.
+# - CONTAINER_IMAGE (unset by default): By default when run locally this script
+#   executes tests directly on the host. The CONTAINER_IMAGE variable can be set
+#   to execute tests in a custom container image for local testing. E.g.:
+#
+#   CONTAINER_IMAGE="us-docker.pkg.dev/tink-test-infrastructure/tink-ci-images/linux-tink-go-base:latest" \
+#     sh ./kokoro/gcp_ubuntu/gomod/run_tests.sh
 set -eEuo pipefail
 
 RUN_COMMAND_ARGS=()
-if [[ -n "${KOKORO_ROOT:-}" ]]; then
-  TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
-  source \
-    "${TINK_BASE_DIR}/tink_go_gcpkms/kokoro/testutils/go_test_container_images.sh"
+if [[ -n "${KOKORO_ARTIFACTS_DIR:-}" ]]; then
+  readonly TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
+  cd "${TINK_BASE_DIR}/tink_go_gcpkms"
+  source "./kokoro/testutils/go_test_container_images.sh"
   CONTAINER_IMAGE="${TINK_GO_BASE_IMAGE}"
   RUN_COMMAND_ARGS+=( -k "${TINK_GCR_SERVICE_KEY}" )
 fi
-: "${TINK_BASE_DIR:=$(cd .. && pwd)}"
-readonly TINK_BASE_DIR
 readonly CONTAINER_IMAGE
-
-# If running from the tink_go_gcpkms folder this has no effect.
-cd "${TINK_BASE_DIR}/tink_go_gcpkms"
 
 if [[ -n "${CONTAINER_IMAGE:-}" ]]; then
   RUN_COMMAND_ARGS+=( -c "${CONTAINER_IMAGE}" )
 fi
 
-# Check for dependencies in TINK_BASE_DIR. Any that aren't present will be
-# downloaded.
-readonly GITHUB_ORG="https://github.com/tink-crypto"
-./kokoro/testutils/fetch_git_repo_if_not_present.sh "${TINK_BASE_DIR}" \
-  "${GITHUB_ORG}/tink-go"
+readonly MODULE_URL="github.com/tink-crypto/tink-go-gcpkms"
+readonly MODULE_VERSION="$(cat version.bzl | grep ^TINK | cut -f 2 -d \")"
 
-./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
+./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
+  ./kokoro/testutils/run_go_mod_tests.sh "${MODULE_URL}" . \
+    "${MODULE_VERSION}" "main"
 
-readonly TINK_GO_MODULE_URL="github.com/tink-crypto/tink-go/v2"
-readonly TINK_GO_GCPKMS_MODULE_URL="github.com/tink-crypto/tink-go-gcpkms"
-readonly TINK_VERSION="$(cat version.bzl | grep ^TINK | cut -f 2 -d \")"
-
-cp go.mod go.mod.bak
-
-cat <<EOF > _do_run_test.sh
-set -euo pipefail
-
-# Modify go.mod locally to use the version of tink-go in ../tink_go.
-go mod edit "-replace=${TINK_GO_MODULE_URL}=../tink_go"
-go mod tidy
-go list -m all | grep tink-go
-./kokoro/testutils/run_go_mod_tests.sh "${TINK_GO_GCPKMS_MODULE_URL}" . \
-  "${TINK_VERSION}" "main"
-EOF
-chmod +x _do_run_test.sh
-
-# Run cleanup on EXIT.
-trap cleanup EXIT
-
-cleanup() {
-  mv go.mod.bak go.mod
-  rm -rf _do_run_test.sh
-}
-
-./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" ./_do_run_test.sh

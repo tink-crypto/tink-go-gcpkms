@@ -82,8 +82,6 @@ http_archive(
     ],
 )
 
-# Placeholder for tink-go http_archive or local_repository.
-
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 # Tink Go Google Cloud KMS Deps.
@@ -94,8 +92,6 @@ load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_depe
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
 
 protobuf_deps()
-
-# Placeholder for tink-go dependencies.
 
 # gazelle:repository_macro deps.bzl%tink_go_gcpkms_dependencies
 tink_go_gcpkms_dependencies()

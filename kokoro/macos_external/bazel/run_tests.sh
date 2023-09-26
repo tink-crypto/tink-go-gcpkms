@@ -14,46 +14,20 @@
 # limitations under the License.
 ################################################################################
 
-# The user may specify TINK_BASE_DIR as the folder where to look for
-# tink-go-gcpkms dependencies.
-
 set -euo pipefail
 
 if [[ -n "${KOKORO_ROOT:-}" ]]; then
-  TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
+  readonly TINK_BASE_DIR="$(echo "${KOKORO_ARTIFACTS_DIR}"/git*)"
   cd "${TINK_BASE_DIR}/tink_go_gcpkms"
 fi
 
-: "${TINK_BASE_DIR:=$(cd .. && pwd)}"
-
-# Check for dependencies in TINK_BASE_DIR. Any that aren't present will be
-# downloaded.
-readonly GITHUB_ORG="https://github.com/tink-crypto"
-./kokoro/testutils/fetch_git_repo_if_not_present.sh "${TINK_BASE_DIR}" \
-  "${GITHUB_ORG}/tink-go"
-
 # Sourcing required to update callers environment.
 source ./kokoro/testutils/install_go.sh
-
 echo "Using go binary from $(which go): $(go version)"
 
 # TODO(b/238389921): Run check_go_generated_files_up_to_date.sh after a
 # refactoring that takes into account extensions to tink-go.
-
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
-
-# Replace com_github_tink_crypto_tink_go_v2 with a local one.
-grep -r "com_github_tink_crypto_tink_go_v2" -l --include="*.bazel"  . \
-  | xargs sed -i '.bak' \
-      "s~com_github_tink_crypto_tink_go_v2~com_github_tink_crypto_tink_go_local~g"
-
-sed -i '.bak' \
-  's~workspace(name = "tink_go_gcpkms")~workspace(name = "tink_go_gcpkms")\
-\
-local_repository(\
-    name = "com_github_tink_crypto_tink_go_local",\
-    path = "'"${TINK_BASE_DIR}"'/tink_go",\
-)~' WORKSPACE
 
 MANUAL_TARGETS=()
 # Run manual tests that rely on test data only available via Bazel.
@@ -62,7 +36,5 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
 fi
 readonly MANUAL_TARGETS
 
-./kokoro/testutils/run_bazel_tests.sh \
-  -t --test_arg=--test.v . "${MANUAL_TARGETS[@]}"
-
-mv WORKSPACE.bak WORKSPACE
+./kokoro/testutils/run_bazel_tests.sh -t --test_arg=--test.v . \
+  "${MANUAL_TARGETS[@]}"
