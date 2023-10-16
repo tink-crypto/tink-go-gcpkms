@@ -23,8 +23,8 @@ go_library(
 go_test(
     name = "gcpkms_test",
     srcs = [
-        "gcp_kms_integration_test.go",
         "gcp_kms_client_test.go",
+        "gcp_kms_integration_test.go",
     ],
     data = [
         # Credentials can be injected into the test files included in these
@@ -38,10 +38,6 @@ go_test(
     deps = [
         ":gcpkms",
         "@com_github_tink_crypto_tink_go_v2//aead",
-        "@com_github_tink_crypto_tink_go_v2//core/registry",
-        "@com_github_tink_crypto_tink_go_v2//keyset",
-        "@com_github_tink_crypto_tink_go_v2//subtle/random",
-        "@com_github_tink_crypto_tink_go_v2//tink",
         "@org_golang_google_api//option",
     ],
 )

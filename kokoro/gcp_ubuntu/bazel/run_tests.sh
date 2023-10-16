@@ -41,9 +41,14 @@ if [[ -n "${CONTAINER_IMAGE:-}" ]]; then
   RUN_COMMAND_ARGS+=( -c "${CONTAINER_IMAGE}" )
 fi
 
-# TODO(b/238389921): Run check_go_generated_files_up_to_date.sh after a
-# refactoring that takes into account extensions to tink-go.
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
+
+cat <<'EOF' > _do_run_test.sh
+#!/bin/bash
+
+set -euo pipefail
+
+./kokoro/testutils/check_go_generated_files_up_to_date.sh "$(pwd)"
 
 MANUAL_TARGETS=()
 # Run manual tests that rely on test data only available via Bazel.
@@ -51,7 +56,22 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
   MANUAL_TARGETS+=( "//integration/gcpkms:gcpkms_test" )
 fi
 readonly MANUAL_TARGETS
+./kokoro/testutils/run_bazel_tests.sh \
+  -t --test_arg=--test.v . "${MANUAL_TARGETS[@]}"
+EOF
+chmod +x _do_run_test.sh
 
-./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
-  ./kokoro/testutils/run_bazel_tests.sh \
-    -t --test_arg=--test.v . "${MANUAL_TARGETS[@]}"
+cat <<EOF > _env_variables.txt
+KOKORO_ROOT
+EOF
+RUN_COMMAND_ARGS+=( -e _env_variables.txt )
+
+# Run cleanup on EXIT.
+trap cleanup EXIT
+
+cleanup() {
+  rm -rf _do_run_test.sh
+  rm -rf _env_variables.txt
+}
+
+./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" ./_do_run_test.sh
