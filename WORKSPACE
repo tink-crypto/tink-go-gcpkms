@@ -2,45 +2,14 @@ workspace(name = "tink_go_gcpkms")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-# -------------------------------------------------------------------------
-# Bazel Skylib.
-# -------------------------------------------------------------------------
-# Release from 2023-02-09
-# Protobuf vX.21.9 imports a version of bazel-skylib [1] that is incompatible
-# with the one required by bazel-gazelle, so we make sure we have a newer
-# version [2].
-#
-# [1] https://github.com/protocolbuffers/protobuf/blob/90b73ac3f0b10320315c2ca0d03a5a9b095d2f66/protobuf_deps.bzl#L28
-# [2] https://github.com/bazelbuild/bazel-gazelle/issues/1290#issuecomment-1312809060
-http_archive(
-    name = "bazel_skylib",
-    sha256 = "b8a1527901774180afc798aeb28c4634bdccf19c4d98e7bdd1ce79d1fe9aaad7",
-    urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.4.1/bazel-skylib-1.4.1.tar.gz",
-        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.4.1/bazel-skylib-1.4.1.tar.gz",
-    ],
-)
-
-# -------------------------------------------------------------------------
-# Protobuf.
-# -------------------------------------------------------------------------
-# proto_library, cc_proto_library and java_proto_library rules implicitly
-# depend respectively on:
-#   * @com_google_protobuf//:proto
-#   * @com_google_protobuf//:cc_toolchain
-#   * @com_google_protobuf//:java_toolchain
-# This statement defines the @com_google_protobuf repo.
-# Release X.21.9 from 2022-10-26.
+# Release X.25.2 from 2024-01-09.
 http_archive(
     name = "com_google_protobuf",
-    strip_prefix = "protobuf-21.9",
-    urls = ["https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.9.zip"],
-    sha256 = "5babb8571f1cceafe0c18e13ddb3be556e87e12ceea3463d6b0d0064e6cc1ac3",
+    sha256 = "5e8e2b369a6fcaa24fada21135782eef147aec467cd286c108936a3277e88d2b",
+    strip_prefix = "protobuf-25.2",
+    urls = ["https://github.com/protocolbuffers/protobuf/releases/download/v25.2/protobuf-25.2.zip"],
 )
 
-# -------------------------------------------------------------------------
-# Bazel rules for Go.
-# -------------------------------------------------------------------------
 # Release from 2023-04-20
 http_archive(
     name = "io_bazel_rules_go",
@@ -51,9 +20,6 @@ http_archive(
     ],
 )
 
-# -------------------------------------------------------------------------
-# Bazel Gazelle.
-# -------------------------------------------------------------------------
 # Release from 2023-01-14
 http_archive(
     name = "bazel_gazelle",
