@@ -101,8 +101,8 @@ def tink_go_gcpkms_dependencies():
     go_repository(
         name = "com_github_google_go_cmp",
         importpath = "github.com/google/go-cmp",
-        sum = "h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=",
-        version = "v0.5.9",
+        sum = "h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=",
+        version = "v0.6.0",
     )
     go_repository(
         name = "com_github_google_go_pkcs11",
@@ -165,8 +165,8 @@ def tink_go_gcpkms_dependencies():
     go_repository(
         name = "com_github_tink_crypto_tink_go_v2",
         importpath = "github.com/tink-crypto/tink-go/v2",
-        sum = "h1:LutFJapahsM0i/6hKfOkzSYTVeshmFs+jloZXqe9z9s=",
-        version = "v2.0.0",
+        sum = "h1:QXFBguwMwTIaU17EgZpEJWsUSc60b1BAGTzBIoMdmok=",
+        version = "v2.1.0",
     )
 
     go_repository(

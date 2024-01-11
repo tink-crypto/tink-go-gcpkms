@@ -3,7 +3,7 @@ module github.com/tink-crypto/tink-go-gcpkms/v2
 go 1.20
 
 require (
-	github.com/tink-crypto/tink-go/v2 v2.0.0
+	github.com/tink-crypto/tink-go/v2 v2.1.0
 	google.golang.org/api v0.147.0
 )
 
