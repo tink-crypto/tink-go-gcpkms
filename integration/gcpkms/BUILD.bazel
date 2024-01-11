@@ -31,8 +31,6 @@ go_test(
         # targets.
         "//testdata/gcp:credentials",
         "//testdata/keysets:ecies",
-        "@google_root_pem//file",  #keep
-        "@wycheproof//testvectors:all",  #keep
     ],
     tags = ["manual"],
     deps = [

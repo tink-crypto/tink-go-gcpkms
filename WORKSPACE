@@ -1,13 +1,6 @@
 workspace(name = "tink_go_gcpkms")
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
-
-http_file(
-    name = "google_root_pem",
-    executable = 0,
-    sha256 = "1acf0d4780541758be2c0f998e1e0275232626ed3f8793d8e2fe8e2753750613",
-    urls = ["https://pki.goog/roots.pem"],
-)
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # -------------------------------------------------------------------------
 # Bazel Skylib.
@@ -43,17 +36,6 @@ http_archive(
     strip_prefix = "protobuf-21.9",
     urls = ["https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.9.zip"],
     sha256 = "5babb8571f1cceafe0c18e13ddb3be556e87e12ceea3463d6b0d0064e6cc1ac3",
-)
-
-# -------------------------------------------------------------------------
-# Wycheproof.
-# -------------------------------------------------------------------------
-# Commit from 2019-12-17
-http_archive(
-    name = "wycheproof",
-    sha256 = "eb1d558071acf1aa6d677d7f1cabec2328d1cf8381496c17185bd92b52ce7545",
-    strip_prefix = "wycheproof-d8ed1ba95ac4c551db67f410c06131c3bc00a97c",
-    url = "https://github.com/google/wycheproof/archive/d8ed1ba95ac4c551db67f410c06131c3bc00a97c.zip",
 )
 
 # -------------------------------------------------------------------------
