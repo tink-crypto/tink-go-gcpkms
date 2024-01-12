@@ -250,8 +250,8 @@ def tink_go_gcpkms_dependencies():
     go_repository(
         name = "org_golang_google_grpc",
         importpath = "google.golang.org/grpc",
-        sum = "h1:SXUpjxeVF3FKrTYQI4f4KvbGD5u2xccdYdurwowix5I=",
-        version = "v1.58.2",
+        sum = "h1:BjnpXut1btbtgN/6sp+brB2Kbm2LjNXnidYujAVbSoQ=",
+        version = "v1.58.3",
     )
 
     go_repository(
