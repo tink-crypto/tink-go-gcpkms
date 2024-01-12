@@ -56,8 +56,12 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
   MANUAL_TARGETS+=( "//integration/gcpkms:gcpkms_test" )
 fi
 readonly MANUAL_TARGETS
-./kokoro/testutils/run_bazel_tests.sh \
-  -t --test_arg=--test.v . "${MANUAL_TARGETS[@]}"
+
+./kokoro/testutils/run_bazel_tests.sh -t --test_arg=--test.v . \
+  "${MANUAL_TARGETS[@]}"
+
+./kokoro/testutils/run_bazel_tests.sh -b --enable_bzlmod \
+  -t --enable_bzlmod,--test_arg=--test.v . "${MANUAL_TARGETS[@]}"
 EOF
 chmod +x _do_run_test.sh
 
