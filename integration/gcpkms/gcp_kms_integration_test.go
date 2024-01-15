@@ -23,7 +23,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"flag"
+	// Placeholder for internal flag import.
 	// context is used to cancel outstanding requests
 	"google.golang.org/api/option"
 	"github.com/tink-crypto/tink-go/v2/aead"
@@ -38,11 +38,7 @@ var (
 	credFile = "testdata/gcp/credential.json"
 )
 
-func init() {
-	certPath := filepath.Join(os.Getenv("TEST_SRCDIR"), "tink_base/roots.pem")
-	flag.Set("cacerts", certPath)
-	os.Setenv("SSL_CERT_FILE", certPath)
-}
+// Placeholder for internal initialization.
 
 func TestGetAeadWithEnvelopeAead(t *testing.T) {
 	srcDir, ok := os.LookupEnv("TEST_SRCDIR")
