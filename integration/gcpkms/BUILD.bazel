@@ -23,6 +23,7 @@ go_library(
 go_test(
     name = "gcpkms_test",
     srcs = [
+        "gcp_kms_aead_test.go",
         "gcp_kms_client_test.go",
         "gcp_kms_integration_test.go",
     ],
@@ -30,10 +31,11 @@ go_test(
         # Google Cloud KMS credentials to be used.
         "//testdata/gcp:credentials",
     ],
+    embed = [":gcpkms"],
     tags = ["manual"],
     deps = [
-        ":gcpkms",
         "@com_github_tink_crypto_tink_go_v2//aead",
+        "@org_golang_google_api//cloudkms/v1:cloudkms",
         "@org_golang_google_api//option",
     ],
 )
