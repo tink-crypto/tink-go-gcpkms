@@ -25,8 +25,6 @@ fi
 source ./kokoro/testutils/install_go.sh
 echo "Using go binary from $(which go): $(go version)"
 
-# TODO(b/238389921): Run check_go_generated_files_up_to_date.sh after a
-# refactoring that takes into account extensions to tink-go.
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 
 MANUAL_TARGETS=()
