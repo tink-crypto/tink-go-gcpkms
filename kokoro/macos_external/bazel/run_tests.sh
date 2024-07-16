@@ -27,6 +27,18 @@ echo "Using go binary from $(which go): $(go version)"
 
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 
+RUN_BAZEL_TESTS_OPTS=(
+  -t
+  --test_arg=--test.v
+)
+if [[ -n "${TINK_REMOTE_BAZEL_CACHE_GCS_BUCKET:-}" ]]; then
+  cp "${TINK_REMOTE_BAZEL_CACHE_SERVICE_KEY}" ./cache_key
+  RUN_BAZEL_TESTS_OPTS+=(
+    -c "${TINK_REMOTE_BAZEL_CACHE_GCS_BUCKET}/bazel/macos_tink_go_gcpkms"
+  )
+fi
+readonly RUN_BAZEL_TESTS_OPTS
+
 MANUAL_TARGETS=()
 # Run manual tests that rely on test data only available via Bazel.
 if [[ -n "${KOKORO_ROOT:-}" ]]; then
@@ -34,5 +46,5 @@ if [[ -n "${KOKORO_ROOT:-}" ]]; then
 fi
 readonly MANUAL_TARGETS
 
-./kokoro/testutils/run_bazel_tests.sh -t --test_arg=--test.v . \
+./kokoro/testutils/run_bazel_tests.sh "${RUN_BAZEL_TESTS_OPTS[@]}" . \
   "${MANUAL_TARGETS[@]}"
