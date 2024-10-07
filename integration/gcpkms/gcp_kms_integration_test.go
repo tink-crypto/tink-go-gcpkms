@@ -38,18 +38,22 @@ var (
 
 // Placeholder for internal initialization.
 
-func TestGetAeadWithEnvelopeAead(t *testing.T) {
+func testFilePath(t *testing.T, filename string) string {
+	t.Helper()
 	srcDir, ok := os.LookupEnv("TEST_SRCDIR")
-	if !ok {
-		t.Skip("TEST_SRCDIR not set")
+	if ok {
+		workspaceDir, ok := os.LookupEnv("TEST_WORKSPACE")
+		if !ok {
+			t.Fatal("TEST_WORKSPACE not found")
+		}
+		return filepath.Join(srcDir, workspaceDir, filename)
 	}
-	workspaceDir, ok := os.LookupEnv("TEST_WORKSPACE")
-	if !ok {
-		t.Skip("TEST_WORKSPACE not set")
-	}
+	return filepath.Join("../..", filename)
+}
+
+func TestGetAeadWithEnvelopeAead(t *testing.T) {
 	ctx := context.Background()
-	gcpClient, err := gcpkms.NewClientWithOptions(
-		ctx, keyURI, option.WithCredentialsFile(filepath.Join(srcDir, workspaceDir, credFile)))
+	gcpClient, err := gcpkms.NewClientWithOptions(ctx, keyURI, option.WithCredentialsFile(testFilePath(t, credFile)))
 	if err != nil {
 		t.Fatalf("gcpkms.NewClientWithOptions() err = %q, want nil", err)
 	}
@@ -85,17 +89,8 @@ func TestGetAeadWithEnvelopeAead(t *testing.T) {
 }
 
 func TestAead(t *testing.T) {
-	srcDir, ok := os.LookupEnv("TEST_SRCDIR")
-	if !ok {
-		t.Skip("TEST_SRCDIR not set")
-	}
-	workspaceDir, ok := os.LookupEnv("TEST_WORKSPACE")
-	if !ok {
-		t.Skip("TEST_WORKSPACE not set")
-	}
 	ctx := context.Background()
-	gcpClient, err := gcpkms.NewClientWithOptions(
-		ctx, keyURI, option.WithCredentialsFile(filepath.Join(srcDir, workspaceDir, credFile)))
+	gcpClient, err := gcpkms.NewClientWithOptions(ctx, keyURI, option.WithCredentialsFile(testFilePath(t, credFile)))
 	if err != nil {
 		t.Fatalf("gcpkms.NewClientWithOptions() err = %q, want nil", err)
 	}
