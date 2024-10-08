@@ -2,18 +2,15 @@
 
 <!-- GCP Ubuntu --->
 
-[tink_go_gcpkms_bazel_badge_gcp_ubuntu]: https://storage.googleapis.com/tink-kokoro-build-badges/tink-go-gcpkms-bazel-gcp-ubuntu.svg
 [tink_go_gcpkms_gomod_badge_gcp_ubuntu]: https://storage.googleapis.com/tink-kokoro-build-badges/tink-go-gcpkms-gomod-gcp-ubuntu.svg
 
 <!-- MacOS --->
 
-[tink_go_gcpkms_bazel_badge_macos]: https://storage.googleapis.com/tink-kokoro-build-badges/tink-go-gcpkms-bazel-macos-external.svg
 [tink_go_gcpkms_gomod_badge_macos]: https://storage.googleapis.com/tink-kokoro-build-badges/tink-go-gcpkms-gomod-macos-external.svg
 
-**Test**     | **GCP Ubuntu**                                                 | **MacOS**
------------- | -------------------------------------------------------------- | ---------
-Tink (Bazel) | [![Bazel_GcpUbuntu][tink_go_gcpkms_bazel_badge_gcp_ubuntu]](#) | [![Bazel_MacOs][tink_go_gcpkms_bazel_badge_macos]](#)
-Tink (Gomod) | [![Gomod_GcpUbuntu][tink_go_gcpkms_gomod_badge_gcp_ubuntu]](#) | [![Gomod_MacOs][tink_go_gcpkms_gomod_badge_macos]](#)
+**Test** | **GCP Ubuntu**                                                 | **MacOS**
+-------- | -------------------------------------------------------------- | ---------
+Gomod    | [![Gomod_GcpUbuntu][tink_go_gcpkms_gomod_badge_gcp_ubuntu]](#) | [![Gomod_MacOs][tink_go_gcpkms_gomod_badge_macos]](#)
 
 This is an extension to the [Tink Go](https://github.com/tink-crypto/tink-go)
 library that provides support for Google Cloud KMS.
