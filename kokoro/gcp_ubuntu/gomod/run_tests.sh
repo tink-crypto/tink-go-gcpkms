@@ -44,6 +44,8 @@ fi
 readonly MODULE_URL="github.com/tink-crypto/tink-go-gcpkms"
 readonly MODULE_VERSION="$(cat version.bzl | grep ^TINK | cut -f 2 -d \")"
 
+./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
+  ./kokoro/testutils/check_go_generated_files_up_to_date.sh .
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 ./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
   ./kokoro/testutils/run_go_mod_tests.sh "${MODULE_URL}" . \
