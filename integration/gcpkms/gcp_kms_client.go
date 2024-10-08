@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package gcpkms provides integration with the GCP Cloud KMS.
-// Tink APIs work with GCP and AWS KMS.
+// Package gcpkms provides integration with the [GCP Cloud KMS].
+//
+// Version: 2.2.0
+//
+// [GCP Cloud KMS]: https://cloud.google.com/kms/docs/quickstart.
 package gcpkms
 
 import (

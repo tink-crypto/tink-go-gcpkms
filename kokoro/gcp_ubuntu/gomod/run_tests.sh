@@ -42,7 +42,9 @@ if [[ -n "${CONTAINER_IMAGE:-}" ]]; then
 fi
 
 readonly MODULE_URL="github.com/tink-crypto/tink-go-gcpkms"
-readonly MODULE_VERSION="$(cat version.bzl | grep ^TINK | cut -f 2 -d \")"
+readonly MODULE_VERSION="$(cat integration/gcpkms/gcp_kms_client.go \
+                          | grep '// Version:' \
+                          | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')"
 
 ./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
   ./kokoro/testutils/check_go_generated_files_up_to_date.sh .
