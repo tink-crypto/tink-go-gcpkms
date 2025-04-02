@@ -14,8 +14,6 @@
 
 // Package gcpkms provides integration with the [GCP Cloud KMS].
 //
-// Version: 2.2.0
-//
 // [GCP Cloud KMS]: https://cloud.google.com/kms/docs/quickstart.
 package gcpkms
 
