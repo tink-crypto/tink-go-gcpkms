@@ -88,6 +88,132 @@ func TestGetAeadWithEnvelopeAead(t *testing.T) {
 	}
 }
 
+func TestAeadWithTransportGRPC(t *testing.T) {
+	ctx := context.Background()
+
+	opts := []gcpkms.Option{
+		gcpkms.WithTransport(gcpkms.TransportGRPC),
+		gcpkms.WithGoogleAPIClientOptions(option.WithCredentialsFile(testFilePath(t, credFile))),
+	}
+	gcpClient, err := gcpkms.NewClient(ctx, keyURI, opts...)
+	if err != nil {
+		t.Fatalf("gcpkms.NewClient() err = %q, want nil", err)
+	}
+	aead, err := gcpClient.GetAEAD(keyURI)
+	if err != nil {
+		t.Fatalf("gcpClient.GetAEAD(keyURI) err = %q, want nil", err)
+	}
+
+	testcases := []struct {
+		name           string
+		plaintext      []byte
+		associatedData []byte
+	}{
+		{
+			name:           "empty_plaintext",
+			plaintext:      []byte(""),
+			associatedData: []byte("authenticated data"),
+		},
+		{
+			name:           "empty_associated_data",
+			plaintext:      []byte("plaintext"),
+			associatedData: []byte(""),
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			ciphertext, err := aead.Encrypt(tc.plaintext, tc.associatedData)
+			if err != nil {
+				t.Fatalf("aead.EncryptWithContext(plaintext, associatedData) err = %q, want nil", err)
+			}
+			gotPlaintext, err := aead.Decrypt(ciphertext, tc.associatedData)
+			if err != nil {
+				t.Fatalf("aead.DecryptWithContext(ciphertext, associatedData) err = %q, want nil", err)
+			}
+			if !bytes.Equal(gotPlaintext, tc.plaintext) {
+				t.Errorf("aead.DecryptWithContext() = %q, want %q", gotPlaintext, tc.plaintext)
+			}
+		})
+	}
+}
+
+func TestAeadCrossClient(t *testing.T) {
+	ctx := context.Background()
+
+	httpOpts := []gcpkms.Option{
+		gcpkms.WithTransport(gcpkms.TransportREST),
+		gcpkms.WithGoogleAPIClientOptions(option.WithCredentialsFile(testFilePath(t, credFile))),
+	}
+	httpClient, err := gcpkms.NewClient(ctx, keyURI, httpOpts...)
+	if err != nil {
+		t.Fatalf("gcpkms.NewClient() err = %q, want nil", err)
+	}
+	httpAEAD, err := httpClient.GetAEAD(keyURI)
+	if err != nil {
+		t.Fatalf("httpClient.GetAEAD(keyURI) err = %q, want nil", err)
+	}
+
+	grpcOpts := []gcpkms.Option{
+		gcpkms.WithTransport(gcpkms.TransportGRPC),
+		gcpkms.WithGoogleAPIClientOptions(option.WithCredentialsFile(testFilePath(t, credFile))),
+	}
+	grpcClient, err := gcpkms.NewClient(ctx, keyURI, grpcOpts...)
+	if err != nil {
+		t.Fatalf("gcpkms.NewClient() err = %q, want nil", err)
+	}
+	grpcAEAD, err := grpcClient.GetAEAD(keyURI)
+	if err != nil {
+		t.Fatalf("grpcClient.GetAEAD(keyURI) err = %q, want nil", err)
+	}
+
+	testcases := []struct {
+		name           string
+		plaintext      []byte
+		associatedData []byte
+	}{
+		{
+			name:           "empty_plaintext",
+			plaintext:      []byte(""),
+			associatedData: []byte("authenticated data"),
+		},
+		{
+			name:           "empty_associated_data",
+			plaintext:      []byte("plaintext"),
+			associatedData: []byte(""),
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run("encrypt_with_grpc_"+tc.name, func(t *testing.T) {
+			ciphertext, err := grpcAEAD.Encrypt(tc.plaintext, tc.associatedData)
+			if err != nil {
+				t.Fatalf("grpcAEAD.Encrypt(plaintext, associatedData) err = %q, want nil", err)
+			}
+			gotPlaintext, err := httpAEAD.Decrypt(ciphertext, tc.associatedData)
+			if err != nil {
+				t.Fatalf("httpAEAD.Decrypt(ciphertext, associatedData) err = %q, want nil", err)
+			}
+			if !bytes.Equal(gotPlaintext, tc.plaintext) {
+				t.Errorf("httpAEAD.Decrypt() = %q, want %q", gotPlaintext, tc.plaintext)
+			}
+		})
+		t.Run("encrypt_with_http_"+tc.name, func(t *testing.T) {
+			ciphertext, err := httpAEAD.Encrypt(tc.plaintext, tc.associatedData)
+			if err != nil {
+				t.Fatalf("httpAEAD.Encrypt(plaintext, associatedData) err = %q, want nil", err)
+			}
+			gotPlaintext, err := grpcAEAD.Decrypt(ciphertext, tc.associatedData)
+			if err != nil {
+				t.Fatalf("grpcAEAD.Decrypt(ciphertext, associatedData) err = %q, want nil", err)
+			}
+			if !bytes.Equal(gotPlaintext, tc.plaintext) {
+				t.Errorf("grpcAEAD.Decrypt() = %q, want %q", gotPlaintext, tc.plaintext)
+			}
+		})
+	}
+}
+
 func TestAead(t *testing.T) {
 	ctx := context.Background()
 	gcpClient, err := gcpkms.NewClientWithOptions(ctx, keyURI, option.WithCredentialsFile(testFilePath(t, credFile)))
@@ -130,5 +256,30 @@ func TestAead(t *testing.T) {
 				t.Errorf("aead.Decrypt() = %q, want %q", gotPlaintext, tc.plaintext)
 			}
 		})
+	}
+}
+
+func TestAeadWithContext(t *testing.T) {
+	ctx := context.Background()
+	aeadWithContext, err := gcpkms.GetAEADWithContext(ctx, keyURI, gcpkms.WithGoogleAPIClientOptions(option.WithCredentialsFile(testFilePath(t, credFile))))
+	if err != nil {
+		t.Fatalf("gcpkms.GetAEADWithContext() err = %q, want nil", err)
+	}
+
+	plaintext := []byte("message")
+	associatedData := []byte("example context-aware encryption")
+
+	ciphertext, err := aeadWithContext.EncryptWithContext(ctx, plaintext, associatedData)
+	if err != nil {
+		t.Fatalf("aeadWithContext.EncryptWithContext(ctx, plaintext, associatedData) err = %q, want nil", err)
+	}
+
+	gotPlaintext, err := aeadWithContext.DecryptWithContext(ctx, ciphertext, associatedData)
+
+	if err != nil {
+		t.Fatalf("aeadWithContext.DecryptWithContext(ctx, ciphertext, associatedData) err = %q, want nil", err)
+	}
+	if !bytes.Equal(gotPlaintext, plaintext) {
+		t.Errorf("aeadWithContext.DecryptWithContext() = %q, want %q", gotPlaintext, plaintext)
 	}
 }
