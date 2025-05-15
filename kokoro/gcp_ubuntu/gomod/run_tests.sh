@@ -41,7 +41,7 @@ if [[ -n "${CONTAINER_IMAGE:-}" ]]; then
   RUN_COMMAND_ARGS+=( -c "${CONTAINER_IMAGE}" )
 fi
 
-./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
+./kokoro/testutils/docker_execute.sh "${RUN_COMMAND_ARGS[@]}" \
   ./kokoro/testutils/check_go_generated_files_up_to_date.sh .
 ./kokoro/testutils/copy_credentials.sh "testdata" "gcp"
 
@@ -72,5 +72,5 @@ cleanup() {
   rm -rf env_variables.txt
 }
 
-./kokoro/testutils/run_command.sh "${RUN_COMMAND_ARGS[@]}" \
+./kokoro/testutils/docker_execute.sh "${RUN_COMMAND_ARGS[@]}" \
   ./_run_test.sh
