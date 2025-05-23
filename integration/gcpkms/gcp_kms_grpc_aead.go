@@ -16,8 +16,11 @@ package gcpkms
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 	"cloud.google.com/go/kms/apiv1"
 
 	"github.com/tink-crypto/tink-go/v2/tink"
@@ -40,37 +43,57 @@ func newGRPCAEAD(keyURI string, kms *kms.KeyManagementClient) tink.AEADWithConte
 }
 
 // EncryptWithContext encrypts the plaintext with associatedData.
-//
-// TODO: b/308189580 - Add integrity verification.
 func (a *grpcAEAD) EncryptWithContext(ctx context.Context, plaintext, associatedData []byte) ([]byte, error) {
 
 	req := &kmspb.EncryptRequest{
-		Name:                        a.keyURI,
-		Plaintext:                   plaintext,
-		AdditionalAuthenticatedData: associatedData,
+		Name:                              a.keyURI,
+		Plaintext:                         plaintext,
+		PlaintextCrc32C:                   wrapperspb.Int64(computeChecksum(plaintext)),
+		AdditionalAuthenticatedData:       associatedData,
+		AdditionalAuthenticatedDataCrc32C: wrapperspb.Int64(computeChecksum(associatedData)),
 	}
+
 	resp, err := a.kms.Encrypt(ctx, req)
+
 	if err != nil {
 		return nil, err
+	}
+	if !resp.VerifiedPlaintextCrc32C {
+		return nil, fmt.Errorf("KMS request for %q is missing the checksum field plaintext_crc32c, and other information may be missing from the response. Please retry a limited number of times in case the error is transient", a.keyURI)
+	}
+	if !resp.VerifiedAdditionalAuthenticatedDataCrc32C {
+		return nil, fmt.Errorf("KMS request for %q is missing the checksum field additional_authenticated_data_crc32c, and other information may be missing from the response. Please retry a limited number of times in case the error is transient", a.keyURI)
+	}
+	if !strings.HasPrefix(resp.GetName(), a.keyURI) {
+		return nil, fmt.Errorf("the requested key name %q does not match the key name in the KMS response %q", a.keyURI, resp.GetName())
+	}
+	if resp.CiphertextCrc32C.GetValue() != computeChecksum(resp.Ciphertext) {
+		return nil, fmt.Errorf("KMS response corrupted in transit for %q: the checksum in field ciphertext_crc32c did not match the data in field ciphertext. Please retry in case this is a transient error", a.keyURI)
 	}
 
 	return resp.Ciphertext, nil
 }
 
-// DecryptWithContext decrypts ciphertext with with associatedData.
-//
-// TODO: b/308189580 - Add integrity verification.
+// DecryptWithContext decrypts ciphertext with associatedData.
 func (a *grpcAEAD) DecryptWithContext(ctx context.Context, ciphertext, associatedData []byte) ([]byte, error) {
 
 	req := &kmspb.DecryptRequest{
-		Name:                        a.keyURI,
-		Ciphertext:                  ciphertext,
-		AdditionalAuthenticatedData: associatedData,
+		Name:                              a.keyURI,
+		Ciphertext:                        ciphertext,
+		CiphertextCrc32C:                  wrapperspb.Int64(computeChecksum(ciphertext)),
+		AdditionalAuthenticatedData:       associatedData,
+		AdditionalAuthenticatedDataCrc32C: wrapperspb.Int64(computeChecksum(associatedData)),
 	}
+
 	resp, err := a.kms.Decrypt(ctx, req)
+
 	if err != nil {
 		return nil, err
 	}
+	if resp.PlaintextCrc32C.GetValue() != computeChecksum(resp.Plaintext) {
+		return nil, fmt.Errorf("KMS response corrupted in transit for %q: the checksum in field plaintext_crc32c did not match the data in field plaintext. Please retry in case this is a transient error", a.keyURI)
+	}
+
 	return resp.Plaintext, nil
 }
 
