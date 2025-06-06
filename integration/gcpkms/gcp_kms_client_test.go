@@ -1,4 +1,4 @@
-// Copyright 2017 Google Inc.
+// Copyright 2017 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package gcpkms_test
 
 import (
+	"bytes"
 	"context"
 	"log"
 
@@ -26,33 +27,79 @@ import (
 func Example() {
 	const keyURI = "gcp-kms://......"
 	ctx := context.Background()
-	gcpclient, err := gcpkms.NewClientWithOptions(ctx, keyURI, option.WithCredentialsFile("/mysecurestorage/credentials.json"))
+	// Replace "/mysecurestorage/credentials.json" with actual path or other auth method if needed for a real run.
+	credentialsOpt := option.WithCredentialsFile("/mysecurestorage/credentials.json")
+
+	// Get the KEK AEAD as AEADWithContext directly.
+	kekAEAD, err := gcpkms.GetAEADWithContext(ctx, keyURI, gcpkms.WithGoogleAPIClientOptions(credentialsOpt))
 	if err != nil {
-		log.Fatal(err)
-	}
-	kekAEAD, err := gcpclient.GetAEAD(keyURI)
-	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("gcpkms.GetAEADWithContext failed: %v", err)
 	}
 
-	// Get the KMS envelope AEAD primitive.
+	// Create the KMS envelope AEAD primitive using AEADWithContext.
 	dekTemplate := aead.AES128CTRHMACSHA256KeyTemplate()
-	primitive := aead.NewKMSEnvelopeAEAD2(dekTemplate, kekAEAD)
+	envelopeAEAD, err := aead.NewKMSEnvelopeAEADWithContext(dekTemplate, kekAEAD)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("aead.NewKMSEnvelopeAEADWithContext failed: %v", err)
 	}
 
-	// Use the primitive.
-	plaintext := []byte("message")
-	associatedData := []byte("example KMS envelope AEAD encryption")
+	// Use the primitive with context.
+	plaintext := []byte("message for envelope with context")
+	associatedData := []byte("example KMS envelope AEADWithContext encryption")
 
-	ciphertext, err := primitive.Encrypt(plaintext, associatedData)
+	ciphertext, err := envelopeAEAD.EncryptWithContext(ctx, plaintext, associatedData)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("envelopeAEAD.EncryptWithContext failed: %v", err)
 	}
 
-	_, err = primitive.Decrypt(ciphertext, associatedData)
+	decryptedPlaintext, err := envelopeAEAD.DecryptWithContext(ctx, ciphertext, associatedData)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("envelopeAEAD.DecryptWithContext failed: %v", err)
+	}
+
+	if !bytes.Equal(plaintext, decryptedPlaintext) {
+		log.Fatalf("envelope decrypted text (%s) does not match original plaintext (%s)", decryptedPlaintext, plaintext)
+	}
+}
+
+// Example_withoutContext demonstrates how to obtain a tink.AEAD from the GCP KMS client.
+// This approach is useful when working with APIs or parts of Tink that expect a tink.AEAD instance
+// rather than a tink.AEADWithContext.
+func Example_aeadWithoutContext() {
+	const keyURI = "gcp-kms://......"
+	ctx := context.Background()
+	// Replace "/mysecurestorage/credentials.json" with actual path or other auth method if needed for a real run.
+	credentialsOpt := option.WithCredentialsFile("/mysecurestorage/credentials.json")
+
+	// Create a new GCP KMS client.
+	// By default, NewClient uses gRPC.
+	kmsClient, err := gcpkms.NewClient(ctx, keyURI, gcpkms.WithGoogleAPIClientOptions(credentialsOpt))
+	if err != nil {
+		log.Fatalf("gcpkms.NewClient failed: %v", err)
+	}
+
+	// Get a regular tink.AEAD primitive from the client.
+	// If the client is gRPC-based (default), this wraps the underlying AEADWithContext.
+	regularAEAD, err := kmsClient.GetAEAD(keyURI)
+	if err != nil {
+		log.Fatalf("kmsClient.GetAEAD failed: %v", err)
+	}
+
+	// Use the tink.AEAD primitive.
+	plaintext := []byte("message for regular AEAD")
+	associatedData := []byte("example regular AEAD encryption")
+
+	ciphertext, err := regularAEAD.Encrypt(plaintext, associatedData)
+	if err != nil {
+		log.Fatalf("regularAEAD.Encrypt failed: %v", err)
+	}
+
+	decryptedPlaintext, err := regularAEAD.Decrypt(ciphertext, associatedData)
+	if err != nil {
+		log.Fatalf("regularAEAD.Decrypt failed: %v", err)
+	}
+
+	if !bytes.Equal(plaintext, decryptedPlaintext) {
+		log.Fatalf("regular AEAD decrypted text (%s) does not match original plaintext (%s)", decryptedPlaintext, plaintext)
 	}
 }
