@@ -17,10 +17,8 @@ package gcpkms
 import (
 	"encoding/base64"
 	"fmt"
-	"hash/crc32"
 
 	"google.golang.org/api/cloudkms/v1"
-
 	"github.com/tink-crypto/tink-go/v2/tink"
 )
 
@@ -103,13 +101,4 @@ func (a *gcpAEAD) Decrypt(ciphertext, associatedData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("KMS response corrupted in transit for %q: the checksum in field plaintext_crc32c did not match the data in field plaintext. Please retry in case this is a transient error", a.keyName)
 	}
 	return plaintext, nil
-}
-
-// crc32cTable is used to compute checksums. It is defined as a package level variable to avoid
-// re-computation on every CRC calculation.
-var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
-
-// computeChecksum returns the checksum that corresponds to the input value as an int64.
-func computeChecksum(value []byte) int64 {
-	return int64(crc32.Checksum(value, crc32cTable))
 }
