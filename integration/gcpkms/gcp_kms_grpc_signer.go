@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"cloud.google.com/go/kms/apiv1"
 
@@ -57,7 +58,9 @@ func isSupported(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) boo
 		kmspb.CryptoKeyVersion_RSA_SIGN_PKCS1_4096_SHA512,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_3072,
-		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_4096:
+		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_4096,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
+		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
 
 		return true
 	}
@@ -72,7 +75,9 @@ func requiresDataForSign(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgori
 	case kmspb.CryptoKeyVersion_EC_SIGN_ED25519,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_3072,
-		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_4096:
+		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_4096,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
+		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
 
 		return true
 	}
@@ -110,6 +115,10 @@ func getPublicKey(ctx context.Context, keyName string, kms *kms.KeyManagementCli
 	// is transient, following the guidelines in https://cloud.google.com/kms/docs/data-integrity-guidelines
 	for i := 0; i < 3; i++ {
 		response, err = tryGetPublicKey(ctx, kms, req)
+		if err != nil && strings.Contains(err.Error(), "Only NIST_PQC format is supported") {
+			req.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
+			response, err = tryGetPublicKey(ctx, kms, req)
+		}
 		if err != nil && errors.Is(err, errorChecksumMismatch) {
 			continue
 		}
@@ -117,7 +126,7 @@ func getPublicKey(ctx context.Context, keyName string, kms *kms.KeyManagementCli
 	}
 	if err != nil {
 		return nil, err
- 	}
+	}
 	if response.GetName() != keyName {
 		return nil, fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), keyName)
 	}

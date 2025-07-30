@@ -48,7 +48,8 @@ const (
 	KeyNameErrorWrongKeyName                 = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/8"
 	KeyNameErrorUnsupportedAlgorithm         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/9"
 	KeyNameErrorChecksumMismatchGetPublicKey = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/10"
-	KeyNameErrorWrongKeyNameGetPublicKey     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
+	KeyNamePqcAlgorithm                      = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
+	KeyNameErrorWrongKeyNameGetPublicKey     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/12"
 )
 
 type mockKMS struct {
@@ -59,7 +60,14 @@ func ExpectSign(data []byte) []byte {
 	return []byte("signature for " + string(data))
 }
 
+func ExpectSignPQC(data []byte) []byte {
+	return []byte("pqc signature for " + string(data))
+}
+
 func Sign(data []byte, keyName string) []byte {
+	if keyName == KeyNamePqcAlgorithm {
+		return []byte("pqc signature for " + string(data))
+	}
 	return []byte("signature for " + string(data))
 }
 
@@ -108,18 +116,31 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		response.PublicKey.Crc32CChecksum.Value = 1
 		return response, nil
+	case KeyNamePqcAlgorithm:
+		if req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
+			return nil, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
+		}
+		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65
+		response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
+		publicKeyData := []byte("pqc")
+		publicKeyCrc32c := computeChecksum(publicKeyData)
+		response.PublicKey = &kmspb.ChecksummedData{
+			Data:           publicKeyData,
+			Crc32CChecksum: &wrappb.Int64Value{Value: publicKeyCrc32c},
+		}
+		return response, nil
 	case KeyNameErrorWrongKeyNameGetPublicKey:
 		response.Name = "wrong key name"
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
 	default:
-		return nil, status.Errorf(codes.NotFound, "Key not found")
+		return nil, status.Error(codes.NotFound, "Key not found")
 	}
 }
 
 func (s *mockKMS) AsymmetricSign(ctx context.Context, req *kmspb.AsymmetricSignRequest) (*kmspb.AsymmetricSignResponse, error) {
 	if req.GetName() == KeyNameErrorAsymmetricSign {
-		return nil, status.Errorf(codes.Internal, "Internal error")
+		return nil, status.Error(codes.Internal, "Internal error")
 	}
 	response := &kmspb.AsymmetricSignResponse{
 		Name: req.GetName(),
@@ -334,6 +355,12 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			keyName:       KeyNameRequiresDigest,
 			dataToSign:    []byte(Data),
 			wantSignature: ExpectSign([]byte(Digest)),
+		},
+		{
+			name:          "sign pqc algorithm success",
+			keyName:       KeyNamePqcAlgorithm,
+			dataToSign:    []byte(Data),
+			wantSignature: ExpectSignPQC([]byte(Data)),
 		},
 	}
 
