@@ -36,16 +36,19 @@ import (
 )
 
 const (
-	Data                             = "data for signing"
-	Digest                           = "digest for signing"
-	KeyNameRequiresData1             = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/1"
-	KeyNameRequiresData2             = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/2"
-	KeyNameRequiresDigest            = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/3"
-	KeyNameErrorGetPublicKey         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/4"
-	KeyNameErrorAsymmetricSign       = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/5"
-	KeyNameErrorCrc32cNotVerified    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/7"
-	KeyNameErrorWrongKeyName         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/8"
-	KeyNameErrorUnsupportedAlgorithm = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/9"
+	Data                                     = "data for signing"
+	Digest                                   = "digest for signing"
+	KeyNameRequiresData1                     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/1"
+	KeyNameRequiresData2                     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/2"
+	KeyNameRequiresDigest                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/3"
+	KeyNameErrorGetPublicKey                 = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/4"
+	KeyNameErrorAsymmetricSign               = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/5"
+	KeyNameErrorCrc32c                       = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/6"
+	KeyNameErrorCrc32cNotVerified            = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/7"
+	KeyNameErrorWrongKeyName                 = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/8"
+	KeyNameErrorUnsupportedAlgorithm         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/9"
+	KeyNameErrorChecksumMismatchGetPublicKey = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/10"
+	KeyNameErrorWrongKeyNameGetPublicKey     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
 )
 
 type mockKMS struct {
@@ -89,6 +92,9 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 	case KeyNameErrorAsymmetricSign:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
+	case KeyNameErrorCrc32c:
+		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
+		return response, nil
 	case KeyNameErrorCrc32cNotVerified:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
@@ -97,6 +103,14 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 		return response, nil
 	case KeyNameErrorUnsupportedAlgorithm:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_2048_SHA256
+		return response, nil
+	case KeyNameErrorChecksumMismatchGetPublicKey:
+		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
+		response.PublicKey.Crc32CChecksum.Value = 1
+		return response, nil
+	case KeyNameErrorWrongKeyNameGetPublicKey:
+		response.Name = "wrong key name"
+		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
 	default:
 		return nil, status.Errorf(codes.NotFound, "Key not found")
@@ -121,6 +135,8 @@ func (s *mockKMS) AsymmetricSign(ctx context.Context, req *kmspb.AsymmetricSignR
 	switch req.GetName() {
 	case KeyNameErrorWrongKeyName:
 		response.Name = "wrong key name"
+	case KeyNameErrorCrc32c:
+		response.SignatureCrc32C = &wrappb.Int64Value{Value: 1}
 	case KeyNameErrorCrc32cNotVerified:
 		response.VerifiedDataCrc32C = false
 		response.VerifiedDigestCrc32C = false
@@ -209,6 +225,16 @@ func TestNewGRPCSigner_Fails(t *testing.T) {
 			keyName: KeyNameErrorUnsupportedAlgorithm,
 			wantErr: "is not supported",
 		},
+		{
+			name:    "checksum mismatch get public key",
+			keyName: KeyNameErrorChecksumMismatchGetPublicKey,
+			wantErr: "checksum verification failed",
+		},
+		{
+			name:    "wrong key name get public key",
+			keyName: KeyNameErrorWrongKeyNameGetPublicKey,
+			wantErr: "does not match the requested key name",
+		},
 	}
 
 	for _, tc := range testcases {
@@ -246,6 +272,12 @@ func TestGRPCSigner_SignWithContextFails(t *testing.T) {
 			keyName:    KeyNameErrorCrc32cNotVerified,
 			dataToSign: []byte(Data),
 			wantErr:    "checking the input checksum failed",
+		},
+		{
+			name:       "signature checksum mismatch",
+			keyName:    KeyNameErrorCrc32c,
+			dataToSign: []byte(Data),
+			wantErr:    "signature checksum mismatch",
 		},
 		{
 			name:       "oversized input data",

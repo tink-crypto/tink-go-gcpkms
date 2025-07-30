@@ -17,6 +17,7 @@ package gcpkms
 import (
 	"context"
 	"crypto"
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -37,6 +38,8 @@ type GRPCSigner struct {
 // Maximum size of the data that can be signed.
 var kmsMaxSignDataSize = 64 * 1024
 var kmsKeyNameRegex = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+/cryptoKeyVersions/[^/]+$`)
+
+var errorChecksumMismatch = errors.New("checksum verification failed")
 
 func isSupported(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) bool {
 	switch algorithm {
@@ -80,6 +83,8 @@ func requiresDataForSign(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgori
 	return false
 }
 
+// tryGetPublicKey tries to get the public key for the given key name.
+// Requires that the request explicitly specifies the key format.
 func tryGetPublicKey(ctx context.Context, kms *kms.KeyManagementClient, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
 	if req.GetPublicKeyFormat() == kmspb.PublicKey_PUBLIC_KEY_FORMAT_UNSPECIFIED {
 		return nil, fmt.Errorf("public key format is required")
@@ -88,14 +93,35 @@ func tryGetPublicKey(ctx context.Context, kms *kms.KeyManagementClient, req *kms
 	if err != nil {
 		return nil, fmt.Errorf("GCP KMS GetPublicKey failed: %w", err)
 	}
+	checksumReceived := response.GetPublicKey().GetCrc32CChecksum().GetValue()
+	checksumCalculated := computeChecksum(response.GetPublicKey().GetData())
+	if checksumReceived != checksumCalculated {
+		return nil, fmt.Errorf("%w: recieved %d, calculated %d", errorChecksumMismatch, checksumReceived, checksumCalculated)
+	}
 	return response, nil
 }
 
 // getPublicKey gets the public key for the given key name.
 func getPublicKey(ctx context.Context, keyName string, kms *kms.KeyManagementClient) (*kmspb.PublicKey, error) {
 	req := &kmspb.GetPublicKeyRequest{Name: keyName, PublicKeyFormat: kmspb.PublicKey_PEM}
-	response, err := tryGetPublicKey(ctx, kms, req)
-	return response, err
+	var response *kmspb.PublicKey
+	var err error
+	// The goal is to retry a limited number of times on checksum validation errors in case the error
+	// is transient, following the guidelines in https://cloud.google.com/kms/docs/data-integrity-guidelines
+	for i := 0; i < 3; i++ {
+		response, err = tryGetPublicKey(ctx, kms, req)
+		if err != nil && errors.Is(err, errorChecksumMismatch) {
+			continue
+		}
+		break
+	}
+	if err != nil {
+		return nil, err
+ 	}
+	if response.GetName() != keyName {
+		return nil, fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), keyName)
+	}
+	return response, nil
 }
 
 // NewGRPCSigner returns a new GCP KMS client that can be used for signing.
@@ -210,13 +236,18 @@ func (signer *GRPCSigner) SignWithContext(ctx context.Context, data []byte) ([]b
 
 	// Perform integrity checks
 	if response.GetName() != signer.keyName {
-		return nil, fmt.Errorf("the key name in the response does not match the requested key name: %w", err)
+		return nil, fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), signer.keyName)
 	}
 
 	// Since we only request data OR digest for signing, we expect that exactly
 	// one of the checksum fields is verified.
 	if !response.GetVerifiedDataCrc32C() && !response.GetVerifiedDigestCrc32C() {
 		return nil, fmt.Errorf("checking the input checksum failed: %w", err)
+	}
+
+	computedChecksumSignature := computeChecksum(response.GetSignature())
+	if response.GetSignatureCrc32C().GetValue() != computedChecksumSignature {
+		return nil, fmt.Errorf("signature checksum mismatch: %w", err)
 	}
 
 	return response.GetSignature(), nil
