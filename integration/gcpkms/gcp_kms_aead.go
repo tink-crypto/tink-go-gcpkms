@@ -18,14 +18,14 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"google.golang.org/api/cloudkms/v1"
 	"github.com/tink-crypto/tink-go/v2/tink"
+	"google.golang.org/api/cloudkms/v1"
 )
 
 // gcpAEAD represents a GCP KMS service to a particular URI.
 type gcpAEAD struct {
 	keyName string
-	kms     cloudkms.Service
+	kms     *cloudkms.Service
 }
 
 var _ tink.AEAD = (*gcpAEAD)(nil)
@@ -34,7 +34,7 @@ var _ tink.AEAD = (*gcpAEAD)(nil)
 func newGCPAEAD(keyName string, kms *cloudkms.Service) tink.AEAD {
 	return &gcpAEAD{
 		keyName: keyName,
-		kms:     *kms,
+		kms:     kms,
 	}
 }
 
