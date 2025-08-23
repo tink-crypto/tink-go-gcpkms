@@ -24,11 +24,11 @@ import (
 	"runtime"
 	"strings"
 
-	"cloud.google.com/go/kms/apiv1"
-	"google.golang.org/api/cloudkms/v1"
-	"google.golang.org/api/option"
+	kms "cloud.google.com/go/kms/apiv1"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/tink"
+	"google.golang.org/api/cloudkms/v1"
+	"google.golang.org/api/option"
 )
 
 const (
@@ -180,4 +180,12 @@ func (c *Client) GetAEAD(keyURI string) (tink.AEAD, error) {
 	default:
 		return nil, fmt.Errorf("no client present")
 	}
+}
+
+// Close closes the client.
+func (c *Client) Close() error {
+	if c.grpcKMS != nil {
+		return c.grpcKMS.Close()
+	}
+	return nil
 }
