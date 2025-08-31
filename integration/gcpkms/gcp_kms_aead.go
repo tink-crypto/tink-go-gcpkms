@@ -18,14 +18,14 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"google.golang.org/api/cloudkms/v1"
 	"github.com/tink-crypto/tink-go/v2/tink"
+	"google.golang.org/api/cloudkms/v1"
 )
 
 // gcpAEAD represents a GCP KMS service to a particular URI.
 type gcpAEAD struct {
 	keyName string
-	kms     cloudkms.Service
+	kms     *cloudkms.Service
 }
 
 var _ tink.AEAD = (*gcpAEAD)(nil)
@@ -34,7 +34,7 @@ var _ tink.AEAD = (*gcpAEAD)(nil)
 func newGCPAEAD(keyName string, kms *cloudkms.Service) tink.AEAD {
 	return &gcpAEAD{
 		keyName: keyName,
-		kms:     *kms,
+		kms:     kms,
 	}
 }
 
@@ -44,9 +44,9 @@ func newGCPAEAD(keyName string, kms *cloudkms.Service) tink.AEAD {
 func (a *gcpAEAD) Encrypt(plaintext, associatedData []byte) ([]byte, error) {
 
 	req := &cloudkms.EncryptRequest{
-		Plaintext:                         base64.URLEncoding.EncodeToString(plaintext),
+		Plaintext:                         base64.StdEncoding.EncodeToString(plaintext),
 		PlaintextCrc32c:                   computeChecksum(plaintext),
-		AdditionalAuthenticatedData:       base64.URLEncoding.EncodeToString(associatedData),
+		AdditionalAuthenticatedData:       base64.StdEncoding.EncodeToString(associatedData),
 		AdditionalAuthenticatedDataCrc32c: computeChecksum(associatedData),
 		// Send the integrity verification fields even if their value is 0.
 		ForceSendFields: []string{"PlaintextCrc32c", "AdditionalAuthenticatedDataCrc32c"},
@@ -80,9 +80,9 @@ func (a *gcpAEAD) Encrypt(plaintext, associatedData []byte) ([]byte, error) {
 func (a *gcpAEAD) Decrypt(ciphertext, associatedData []byte) ([]byte, error) {
 
 	req := &cloudkms.DecryptRequest{
-		Ciphertext:                        base64.URLEncoding.EncodeToString(ciphertext),
+		Ciphertext:                        base64.StdEncoding.EncodeToString(ciphertext),
 		CiphertextCrc32c:                  computeChecksum(ciphertext),
-		AdditionalAuthenticatedData:       base64.URLEncoding.EncodeToString(associatedData),
+		AdditionalAuthenticatedData:       base64.StdEncoding.EncodeToString(associatedData),
 		AdditionalAuthenticatedDataCrc32c: computeChecksum(associatedData),
 		// Send the integrity verification fields even if their value is 0.
 		ForceSendFields: []string{"CiphertextCrc32c", "AdditionalAuthenticatedDataCrc32c"},
