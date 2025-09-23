@@ -43,6 +43,9 @@ func newGCPAEAD(keyName string, kms *cloudkms.Service) tink.AEAD {
 // (http://cloud.google.com/kms/docs/data-integrity-guidelines#calculating_and_verifying_checksums).
 func (a *gcpAEAD) Encrypt(plaintext, associatedData []byte) ([]byte, error) {
 
+	// Use base64.URLEncoding for encoding the bytes fields in the request, which is consistent
+	// with other Google Cloud clients. However, note that the service also accepts
+	// base64.StdEncoding (https://protobuf.dev/programming-guides/json/).
 	req := &cloudkms.EncryptRequest{
 		Plaintext:                         base64.URLEncoding.EncodeToString(plaintext),
 		PlaintextCrc32c:                   computeChecksum(plaintext),
@@ -79,6 +82,9 @@ func (a *gcpAEAD) Encrypt(plaintext, associatedData []byte) ([]byte, error) {
 // (http://cloud.google.com/kms/docs/data-integrity-guidelines#calculating_and_verifying_checksums).
 func (a *gcpAEAD) Decrypt(ciphertext, associatedData []byte) ([]byte, error) {
 
+	// Use base64.URLEncoding for encoding the bytes fields in the request, which is consistent
+	// with other Google Cloud clients. However, note that the service also accepts
+	// base64.StdEncoding (https://protobuf.dev/programming-guides/json/).
 	req := &cloudkms.DecryptRequest{
 		Ciphertext:                        base64.URLEncoding.EncodeToString(ciphertext),
 		CiphertextCrc32c:                  computeChecksum(ciphertext),
