@@ -18,8 +18,8 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"google.golang.org/api/cloudkms/v1"
 	"github.com/tink-crypto/tink-go/v2/tink"
+	"google.golang.org/api/cloudkms/v1"
 )
 
 // gcpAEAD represents a GCP KMS service to a particular URI.
