@@ -181,3 +181,11 @@ func (c *Client) GetAEAD(keyURI string) (tink.AEAD, error) {
 		return nil, fmt.Errorf("no client present")
 	}
 }
+
+// Close closes the client.
+func (c *Client) Close() error {
+	if c.grpcKMS != nil {
+		return c.grpcKMS.Close()
+	}
+	return nil
+}
