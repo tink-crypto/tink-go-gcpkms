@@ -6,6 +6,7 @@ toolchain go1.24.4
 
 require (
 	cloud.google.com/go/kms v1.22.0
+	github.com/google/go-cmp v0.7.0
 	github.com/tink-crypto/tink-go/v2 v2.4.0
 	google.golang.org/api v0.248.0
 	google.golang.org/genproto v0.0.0-20250826171959-ef028d996bc1

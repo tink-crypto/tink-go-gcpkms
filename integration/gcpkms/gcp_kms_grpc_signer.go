@@ -67,6 +67,23 @@ func isSupported(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) boo
 	return false
 }
 
+// useNISTPQCFormat helps enforce usage of NIST_PQC format for PQC keys, regardless of whether or
+// not they support PEM format.
+func useNISTPQCFormat(response *kmspb.PublicKey, err error) bool {
+	if err != nil && strings.Contains(err.Error(), "Only NIST_PQC format is supported") {
+		return true
+	}
+	if err == nil {
+		switch response.GetAlgorithm() {
+		case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
+			kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
+
+			return true
+		}
+	}
+	return false
+}
+
 // Some AsymmetricSign algorithms require data as input and some other
 // operate on a digest of the data. This method determines if data itself is
 // required for signing and returns true if so.
@@ -115,7 +132,7 @@ func getPublicKey(ctx context.Context, keyName string, kms *kms.KeyManagementCli
 	// is transient, following the guidelines in https://cloud.google.com/kms/docs/data-integrity-guidelines
 	for i := 0; i < 3; i++ {
 		response, err = tryGetPublicKey(ctx, kms, req)
-		if err != nil && strings.Contains(err.Error(), "Only NIST_PQC format is supported") {
+		if useNISTPQCFormat(response, err) {
 			req.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
 			response, err = tryGetPublicKey(ctx, kms, req)
 		}

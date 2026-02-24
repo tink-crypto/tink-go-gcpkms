@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"cloud.google.com/go/kms/apiv1"
+	"github.com/google/go-cmp/cmp"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -50,10 +51,12 @@ const (
 	KeyNameErrorChecksumMismatchGetPublicKey = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/10"
 	KeyNamePqcAlgorithm                      = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
 	KeyNameErrorWrongKeyNameGetPublicKey     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/12"
+	KeyNamePqcAlgorithmSupportsPem           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/13"
 )
 
 type mockKMS struct {
 	kmspbgrpc.UnimplementedKeyManagementServiceServer
+	getPublicKeyFormatRequests []kmspb.PublicKey_PublicKeyFormat
 }
 
 func ExpectSign(data []byte) []byte {
@@ -65,7 +68,7 @@ func ExpectSignPQC(data []byte) []byte {
 }
 
 func Sign(data []byte, keyName string) []byte {
-	if keyName == KeyNamePqcAlgorithm {
+	if keyName == KeyNamePqcAlgorithm || keyName == KeyNamePqcAlgorithmSupportsPem {
 		return []byte("pqc signature for " + string(data))
 	}
 	return []byte("signature for " + string(data))
@@ -120,7 +123,7 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 		if req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
 			return nil, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
 		}
-		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65
+		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S
 		response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
 		publicKeyData := []byte("pqc")
 		publicKeyCrc32c := computeChecksum(publicKeyData)
@@ -132,6 +135,20 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 	case KeyNameErrorWrongKeyNameGetPublicKey:
 		response.Name = "wrong key name"
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
+		return response, nil
+	case KeyNamePqcAlgorithmSupportsPem:
+		s.getPublicKeyFormatRequests = append(s.getPublicKeyFormatRequests, req.GetPublicKeyFormat())
+		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65
+		response.PublicKeyFormat = kmspb.PublicKey_PEM
+		if req.GetPublicKeyFormat() == kmspb.PublicKey_NIST_PQC {
+			response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
+		}
+		publicKeyData := []byte("pqc")
+		publicKeyCrc32c := computeChecksum(publicKeyData)
+		response.PublicKey = &kmspb.ChecksummedData{
+			Data:           publicKeyData,
+			Crc32CChecksum: &wrappb.Int64Value{Value: publicKeyCrc32c},
+		}
 		return response, nil
 	default:
 		return nil, status.Error(codes.NotFound, "Key not found")
@@ -362,12 +379,25 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			dataToSign:    []byte(Data),
 			wantSignature: ExpectSignPQC([]byte(Data)),
 		},
+		{
+			name:          "sign pqc algorithm supports pem",
+			keyName:       KeyNamePqcAlgorithmSupportsPem,
+			dataToSign:    []byte(Data),
+			wantSignature: ExpectSignPQC([]byte(Data)),
+		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockServer := &mockKMS{}
 			signer := initializeSigner(t, mockServer, tc.keyName)
+
+			if tc.keyName == KeyNamePqcAlgorithmSupportsPem {
+				want := []kmspb.PublicKey_PublicKeyFormat{kmspb.PublicKey_PEM, kmspb.PublicKey_NIST_PQC}
+				if !cmp.Equal(mockServer.getPublicKeyFormatRequests, want) {
+					t.Errorf("GetPublicKey requests for %s with formats = %v, want %v", tc.keyName, mockServer.getPublicKeyFormatRequests, want)
+				}
+			}
 
 			gotSignature, err := signer.SignWithContext(t.Context(), tc.dataToSign)
 			if err != nil {
