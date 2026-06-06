@@ -19,7 +19,6 @@ import (
 	"crypto"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"cloud.google.com/go/kms/apiv1"
@@ -38,7 +37,6 @@ type GRPCSigner struct {
 
 // Maximum size of the data that can be signed.
 var kmsMaxSignDataSize = 64 * 1024
-var kmsKeyNameRegex = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+/cryptoKeyVersions/[^/]+$`)
 
 var errorChecksumMismatch = errors.New("checksum verification failed")
 
@@ -152,8 +150,8 @@ func getPublicKey(ctx context.Context, keyName string, kms *kms.KeyManagementCli
 
 // NewGRPCSigner returns a new GCP KMS client that can be used for signing.
 func NewGRPCSigner(ctx context.Context, keyName string, kms *kms.KeyManagementClient) (*GRPCSigner, error) {
-	if !kmsKeyNameRegex.MatchString(keyName) {
-		return nil, fmt.Errorf("keyName %q does not match the expected format %q", keyName, kmsKeyNameRegex.String())
+	if err := validateKMSKeyName(keyName); err != nil {
+		return nil, err
 	}
 	if kms == nil {
 		return nil, fmt.Errorf("kms client cannot be nil")
