@@ -17,21 +17,14 @@ package gcpkms
 import (
 	"bytes"
 	"context"
-	"net"
 	"strings"
 	"testing"
 
-	"cloud.google.com/go/kms/apiv1"
 	"github.com/google/go-cmp/cmp"
-	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 
 	// Placeholder for internal proto import.
-	kmspbgrpc "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 	wrappb "google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -53,11 +46,6 @@ const (
 	KeyNameErrorWrongKeyNameGetPublicKey     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/12"
 	KeyNamePqcAlgorithmSupportsPem           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/13"
 )
-
-type mockKMS struct {
-	kmspbgrpc.UnimplementedKeyManagementServiceServer
-	getPublicKeyFormatRequests []kmspb.PublicKey_PublicKeyFormat
-}
 
 func ExpectSign(data []byte) []byte {
 	return []byte("signature for " + string(data))
@@ -182,46 +170,9 @@ func (s *mockKMS) AsymmetricSign(ctx context.Context, req *kmspb.AsymmetricSignR
 	return response, nil
 }
 
-func setupMockKMSClient(t *testing.T, mockServer *mockKMS) *kms.KeyManagementClient {
-	t.Helper()
-
-	const bufSize = 1024 * 1024
-	lis := bufconn.Listen(bufSize)
-	s := grpc.NewServer()
-
-	kmspbgrpc.RegisterKeyManagementServiceServer(s, mockServer)
-
-	go func() {
-		if err := s.Serve(lis); err != nil {
-			t.Logf("Mock gRPC server exited with error: %v", err)
-		}
-	}()
-
-	t.Cleanup(func() {
-		s.Stop()
-		lis.Close()
-	})
-
-	dialer := func(ctx context.Context, address string) (net.Conn, error) {
-		return lis.Dial()
-	}
-	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithContextDialer(dialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
-
-	if err != nil {
-		t.Fatalf("Failed to dial bufnet: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-
-	gcpKMSClient, err := kms.NewKeyManagementClient(t.Context(), option.WithGRPCConn(conn))
-	if err != nil {
-		t.Fatalf("kms.NewKeyManagementClient with GRPCConn failed: %v", err)
-	}
-	return gcpKMSClient
-}
-
 func initializeSigner(t *testing.T, mockServer *mockKMS, keyName string) *GRPCSigner {
 	t.Helper()
-	gcpKMSClient := setupMockKMSClient(t, mockServer)
+	gcpKMSClient := setupMockKMSClient(t.Context(), t, mockServer)
 	signer, err := NewGRPCSigner(t.Context(), keyName, gcpKMSClient)
 	if err != nil {
 		t.Fatalf("NewGRPCSigner failed: %v", err)
@@ -278,7 +229,7 @@ func TestNewGRPCSigner_Fails(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockServer := &mockKMS{}
-			gcpKMSClient := setupMockKMSClient(t, mockServer)
+			gcpKMSClient := setupMockKMSClient(t.Context(), t, mockServer)
 
 			_, err := NewGRPCSigner(t.Context(), tc.keyName, gcpKMSClient)
 			if err == nil {

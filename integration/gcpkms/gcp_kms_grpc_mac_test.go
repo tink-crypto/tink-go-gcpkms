@@ -36,7 +36,7 @@ func TestNewGRPCMAC_Fails(t *testing.T) {
 		name    string
 		keyName string
 	}
-	testcases := []testCase{
+	testCases := []testCase{
 		{
 			name:    "empty key name",
 			keyName: "",
@@ -51,9 +51,9 @@ func TestNewGRPCMAC_Fails(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testcases {
+	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			gcpKMSClient := setupMockKMSClient(t, &mockKMS{})
+			gcpKMSClient := setupMockKMSClient(t.Context(), t, &mockKMS{})
 
 			if _, err := NewGRPCMAC(tc.keyName, gcpKMSClient); err == nil {
 				t.Errorf("NewGRPCMAC(%q) succeeded, want error", tc.keyName)
@@ -64,7 +64,7 @@ func TestNewGRPCMAC_Fails(t *testing.T) {
 
 // Placeholder - will be replaced by real tests in the next commit.
 func TestGRPCMAC_ComputeMACNotYetImplemented(t *testing.T) {
-	mac, err := NewGRPCMAC(macKeyName, setupMockKMSClient(t, &mockKMS{}))
+	mac, err := NewGRPCMAC(macKeyName, setupMockKMSClient(t.Context(), t, &mockKMS{}))
 	if err != nil {
 		t.Fatalf("NewGRPCMAC failed: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestGRPCMAC_ComputeMACNotYetImplemented(t *testing.T) {
 
 // Placeholder - will be replaced by real tests in the next commit.
 func TestGRPCMAC_VerifyMACNotYetImplemented(t *testing.T) {
-	mac, err := NewGRPCMAC(macKeyName, setupMockKMSClient(t, &mockKMS{}))
+	mac, err := NewGRPCMAC(macKeyName, setupMockKMSClient(t.Context(), t, &mockKMS{}))
 	if err != nil {
 		t.Fatalf("NewGRPCMAC failed: %v", err)
 	}
