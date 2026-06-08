@@ -15,11 +15,18 @@
 package gcpkms
 
 import (
+	"context"
 	"fmt"
 
 	"cloud.google.com/go/kms/apiv1"
 	"github.com/tink-crypto/tink-go/v2/tink"
+
+	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
+
+// kmsMaxMACDataSize represents the maximum size of the data that can be MAC-ed.
+const kmsMaxMACDataSize = 64 * 1024
 
 // GRPCMAC represents a GCP GRPC-based KMS client to a particular MAC key URI.
 type GRPCMAC struct {
@@ -45,7 +52,36 @@ func NewGRPCMAC(keyName string, client *kms.KeyManagementClient) (*GRPCMAC, erro
 
 // ComputeMAC computes a MAC over the input data.
 func (m *GRPCMAC) ComputeMAC(data []byte) ([]byte, error) {
-	return nil, fmt.Errorf("not yet implemented")
+	return m.ComputeMACWithContext(context.TODO(), data)
+}
+
+// ComputeMACWithContext computes a MAC over the input data using KMS.
+func (m *GRPCMAC) ComputeMACWithContext(ctx context.Context, data []byte) ([]byte, error) {
+	if len(data) > kmsMaxMACDataSize {
+		return nil, fmt.Errorf("the input data (%d bytes) is larger than the allowed limit (%d bytes)", len(data), kmsMaxMACDataSize)
+	}
+
+	request := &kmspb.MacSignRequest{
+		Name:       m.keyName,
+		Data:       data,
+		DataCrc32C: wrapperspb.Int64(computeChecksum(data)),
+	}
+
+	response, err := m.client.MacSign(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("GCP KMS MacSign failed: %w", err)
+	}
+
+	if response.GetName() != m.keyName {
+		return nil, fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), m.keyName)
+	}
+	if !response.GetVerifiedDataCrc32C() {
+		return nil, fmt.Errorf("checking the input checksum failed")
+	}
+	if response.GetMacCrc32C().GetValue() != computeChecksum(response.GetMac()) {
+		return nil, fmt.Errorf("MAC checksum mismatch")
+	}
+	return response.GetMac(), nil
 }
 
 // VerifyMAC verifies whether mac is a correct MAC for data.

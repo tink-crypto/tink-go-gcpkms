@@ -15,14 +15,70 @@
 package gcpkms
 
 import (
+	"bytes"
+	"context"
+	"slices"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
-	macKeyName               = "projects/cloudkms-test/locations/global/keyRings/KR/cryptoKeys/K1/cryptoKeyVersions/1"
-	macKeyNameWrongFormat    = "projects/P1/locations/L1/keyRings/KR/cryptoKeys/K1/cryptoKeyVersions"
-	macKeyNameWithoutVersion = "projects/cloudkms-test/locations/global/keyRings/KR/cryptoKeys/K1"
+	macData                              = "data for mac"
+	macWrongData                         = "wrong data for mac"
+	macKeyName                           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/1"
+	macKeyNameWrongFormat                = "projects/P1/locations/L1/keyRings/KR/cryptoKeys/K1/cryptoKeyVersions"
+	macKeyNameWithoutVersion             = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1"
+	macKeyNameErrorMacSign               = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/2"
+	macKeyNameErrorDataCrc32cNotVerified = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/3"
+	macKeyNameErrorMacCrc32c             = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/4"
+	macKeyNameErrorWrongKeyNameSign      = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/5"
 )
+
+func expectedMAC(data []byte) []byte {
+	return slices.Concat([]byte("mac for "), data)
+}
+
+func (s *mockKMS) MacSign(ctx context.Context, req *kmspb.MacSignRequest) (*kmspb.MacSignResponse, error) {
+	if req.GetName() == macKeyNameErrorMacSign {
+		return nil, status.Error(codes.PermissionDenied, "Permission denied")
+	}
+	if req.GetDataCrc32C().GetValue() != computeChecksum(req.GetData()) {
+		return nil, status.Error(codes.InvalidArgument, "invalid data checksum")
+	}
+
+	response := &kmspb.MacSignResponse{
+		Name:               req.GetName(),
+		Mac:                expectedMAC(req.GetData()),
+		VerifiedDataCrc32C: true,
+	}
+	response.MacCrc32C = wrapperspb.Int64(computeChecksum(response.GetMac()))
+
+	switch req.GetName() {
+	case macKeyNameErrorWrongKeyNameSign:
+		response.Name = macKeyName
+	case macKeyNameErrorMacCrc32c:
+		response.MacCrc32C = wrapperspb.Int64(1)
+	case macKeyNameErrorDataCrc32cNotVerified:
+		response.VerifiedDataCrc32C = false
+	}
+
+	return response, nil
+}
+
+func initializeMAC(ctx context.Context, t *testing.T, keyName string) *GRPCMAC {
+	t.Helper()
+	gcpKMSClient := setupMockKMSClient(ctx, t, &mockKMS{})
+	mac, err := NewGRPCMAC(keyName, gcpKMSClient)
+	if err != nil {
+		t.Fatalf("NewGRPCMAC failed: %v", err)
+	}
+	return mac
+}
 
 func TestNewGRPCMAC_NilKmsClientFails(t *testing.T) {
 	_, err := NewGRPCMAC(macKeyName, nil)
@@ -62,14 +118,58 @@ func TestNewGRPCMAC_Fails(t *testing.T) {
 	}
 }
 
-// Placeholder - will be replaced by real tests in the next commit.
-func TestGRPCMAC_ComputeMACNotYetImplemented(t *testing.T) {
-	mac, err := NewGRPCMAC(macKeyName, setupMockKMSClient(t.Context(), t, &mockKMS{}))
-	if err != nil {
-		t.Fatalf("NewGRPCMAC failed: %v", err)
+func TestGRPCMAC_ComputeMACFails(t *testing.T) {
+	type testCase struct {
+		name    string
+		keyName string
+		data    []byte
 	}
-	if _, err := mac.ComputeMAC([]byte{}); err == nil {
-		t.Errorf("mac.ComputeMAC succeeded, want error")
+	testCases := []testCase{
+		{
+			name:    "mac sign fails",
+			keyName: macKeyNameErrorMacSign,
+			data:    []byte(macData),
+		},
+		{
+			name:    "input checksum fails",
+			keyName: macKeyNameErrorDataCrc32cNotVerified,
+			data:    []byte(macData),
+		},
+		{
+			name:    "mac checksum mismatch",
+			keyName: macKeyNameErrorMacCrc32c,
+			data:    []byte(macData),
+		},
+		{
+			name:    "mismatched key name in response",
+			keyName: macKeyNameErrorWrongKeyNameSign,
+			data:    []byte(macData),
+		},
+		{
+			name:    "oversized input data",
+			keyName: macKeyName,
+			data:    bytes.Repeat([]byte("A"), kmsMaxMACDataSize+1),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mac := initializeMAC(t.Context(), t, tc.keyName)
+			if _, err := mac.ComputeMAC(tc.data); err == nil {
+				t.Errorf("mac.ComputeMAC(%q) succeeded, want error", tc.data)
+			}
+		})
+	}
+}
+
+func TestGRPCMAC_ComputeMACSuccess(t *testing.T) {
+	mac := initializeMAC(t.Context(), t, macKeyName)
+	gotMAC, err := mac.ComputeMAC([]byte(macData))
+	if err != nil {
+		t.Fatalf("mac.ComputeMAC(%q) error = %v, want nil", macData, err)
+	}
+	if !bytes.Equal(gotMAC, expectedMAC([]byte(macData))) {
+		t.Errorf("mac.ComputeMAC(%q) = %q, want %q", macData, gotMAC, expectedMAC([]byte(macData)))
 	}
 }
 
