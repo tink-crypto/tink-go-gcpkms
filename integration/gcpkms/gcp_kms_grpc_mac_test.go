@@ -28,15 +28,21 @@ import (
 )
 
 const (
-	macData                              = "data for mac"
-	macWrongData                         = "wrong data for mac"
-	macKeyName                           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/1"
-	macKeyNameWrongFormat                = "projects/P1/locations/L1/keyRings/KR/cryptoKeys/K1/cryptoKeyVersions"
-	macKeyNameWithoutVersion             = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1"
-	macKeyNameErrorMacSign               = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/2"
-	macKeyNameErrorDataCrc32cNotVerified = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/3"
-	macKeyNameErrorMacCrc32c             = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/4"
-	macKeyNameErrorWrongKeyNameSign      = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/5"
+	macData                                    = "data for mac"
+	macWrongData                               = "wrong data for mac"
+	macKeyName                                 = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/1"
+	macKeyNameWrongFormat                      = "projects/P1/locations/L1/keyRings/KR/cryptoKeys/K1/cryptoKeyVersions"
+	macKeyNameWithoutVersion                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1"
+	macKeyNameErrorMacSign                     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/2"
+	macKeyNameErrorDataCrc32cNotVerified       = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/3"
+	macKeyNameErrorMacCrc32c                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/4"
+	macKeyNameErrorWrongKeyNameSign            = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/5"
+	macKeyNameErrorMacVerify                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/6"
+	macKeyNameVerifyErrorDataCrc32cNotVerified = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/7"
+	macKeyNameVerifyErrorMacCrc32cNotVerified  = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/8"
+	macKeyNameVerifyErrorSuccessIntegrity      = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/9"
+	macKeyNameVerifyErrorWrongKeyName          = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/10"
+	macKeyNameVerifyErrorSuccessIntegrityFalse = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
 )
 
 func expectedMAC(data []byte) []byte {
@@ -65,6 +71,43 @@ func (s *mockKMS) MacSign(ctx context.Context, req *kmspb.MacSignRequest) (*kmsp
 		response.MacCrc32C = wrapperspb.Int64(1)
 	case macKeyNameErrorDataCrc32cNotVerified:
 		response.VerifiedDataCrc32C = false
+	}
+
+	return response, nil
+}
+
+func (s *mockKMS) MacVerify(ctx context.Context, req *kmspb.MacVerifyRequest) (*kmspb.MacVerifyResponse, error) {
+	if req.GetName() == macKeyNameErrorMacVerify {
+		return nil, status.Error(codes.PermissionDenied, "Permission denied")
+	}
+	if req.GetDataCrc32C().GetValue() != computeChecksum(req.GetData()) {
+		return nil, status.Error(codes.InvalidArgument, "invalid data checksum")
+	}
+	if req.GetMacCrc32C().GetValue() != computeChecksum(req.GetMac()) {
+		return nil, status.Error(codes.InvalidArgument, "invalid MAC checksum")
+	}
+
+	success := bytes.Equal(req.GetMac(), expectedMAC(req.GetData()))
+	response := &kmspb.MacVerifyResponse{
+		Name:                     req.GetName(),
+		Success:                  success,
+		VerifiedDataCrc32C:       true,
+		VerifiedMacCrc32C:        true,
+		VerifiedSuccessIntegrity: success,
+	}
+
+	switch req.GetName() {
+	case macKeyNameVerifyErrorWrongKeyName:
+		response.Name = macKeyName
+	case macKeyNameVerifyErrorDataCrc32cNotVerified:
+		response.VerifiedDataCrc32C = false
+	case macKeyNameVerifyErrorMacCrc32cNotVerified:
+		response.VerifiedMacCrc32C = false
+	case macKeyNameVerifyErrorSuccessIntegrity:
+		response.VerifiedSuccessIntegrity = false
+	case macKeyNameVerifyErrorSuccessIntegrityFalse:
+		response.Success = false
+		response.VerifiedSuccessIntegrity = true
 	}
 
 	return response, nil
@@ -173,13 +216,95 @@ func TestGRPCMAC_ComputeMACSuccess(t *testing.T) {
 	}
 }
 
-// Placeholder - will be replaced by real tests in the next commit.
-func TestGRPCMAC_VerifyMACNotYetImplemented(t *testing.T) {
-	mac, err := NewGRPCMAC(macKeyName, setupMockKMSClient(t.Context(), t, &mockKMS{}))
-	if err != nil {
-		t.Fatalf("NewGRPCMAC failed: %v", err)
+func TestGRPCMAC_VerifyMACFails(t *testing.T) {
+	validMAC := expectedMAC([]byte(macData))
+
+	type testCase struct {
+		name    string
+		keyName string
+		mac     []byte
+		data    []byte
 	}
-	if err := mac.VerifyMAC([]byte{}, []byte{}); err == nil {
-		t.Errorf("mac.VerifyMAC succeeded, want error")
+	testCases := []testCase{
+		{
+			name:    "mac verify fails",
+			keyName: macKeyNameErrorMacVerify,
+			mac:     validMAC,
+			data:    []byte(macData),
+		},
+		{
+			name:    "data checksum fails",
+			keyName: macKeyNameVerifyErrorDataCrc32cNotVerified,
+			mac:     validMAC,
+			data:    []byte(macData),
+		},
+		{
+			name:    "mac checksum fails",
+			keyName: macKeyNameVerifyErrorMacCrc32cNotVerified,
+			mac:     validMAC,
+			data:    []byte(macData),
+		},
+		{
+			name:    "success integrity false but success true fails",
+			keyName: macKeyNameVerifyErrorSuccessIntegrity,
+			mac:     validMAC,
+			data:    []byte(macData),
+		},
+		{
+			name:    "success integrity true but success false fails",
+			keyName: macKeyNameVerifyErrorSuccessIntegrityFalse,
+			mac:     validMAC,
+			data:    []byte(macData),
+		},
+		{
+			name:    "mismatched key name in response",
+			keyName: macKeyNameVerifyErrorWrongKeyName,
+			mac:     validMAC,
+			data:    []byte(macData),
+		},
+		{
+			name:    "wrong data",
+			keyName: macKeyName,
+			mac:     validMAC,
+			data:    []byte(macWrongData),
+		},
+		{
+			name:    "wrong mac",
+			keyName: macKeyName,
+			mac:     []byte("wrong mac"),
+			data:    []byte(macData),
+		},
+		{
+			name:    "oversized input data",
+			keyName: macKeyName,
+			mac:     validMAC,
+			data:    bytes.Repeat([]byte("A"), kmsMaxMACDataSize+1),
+		},
+		{
+			name:    "oversized input mac",
+			keyName: macKeyName,
+			mac:     bytes.Repeat([]byte("A"), kmsMaxMACSize+1),
+			data:    []byte(macData),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mac := initializeMAC(t.Context(), t, tc.keyName)
+			if err := mac.VerifyMAC(tc.mac, tc.data); err == nil {
+				t.Errorf("mac.VerifyMAC(%q, %q) succeeded, want error", tc.mac, tc.data)
+			}
+		})
+	}
+}
+
+func TestGRPCMAC_VerifyMACSuccess(t *testing.T) {
+	mac := initializeMAC(t.Context(), t, macKeyName)
+	tag, err := mac.ComputeMAC([]byte(macData))
+	if err != nil {
+		t.Fatalf("mac.ComputeMAC(%q) error = %v, want nil", macData, err)
+	}
+	if err := mac.VerifyMAC(tag, []byte(macData)); err != nil {
+		t.Errorf("mac.VerifyMAC(%q, %q) error = %v, want nil", tag, macData, err)
 	}
 }

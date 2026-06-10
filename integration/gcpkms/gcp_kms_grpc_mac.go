@@ -28,6 +28,9 @@ import (
 // kmsMaxMACDataSize represents the maximum size of the data that can be MAC-ed.
 const kmsMaxMACDataSize = 64 * 1024
 
+// kmsMaxMACSize represents the maximum size of the MAC that can be verified.
+const kmsMaxMACSize = 64
+
 // GRPCMAC represents a GCP GRPC-based KMS client to a particular MAC key URI.
 type GRPCMAC struct {
 	keyName string
@@ -86,5 +89,45 @@ func (m *GRPCMAC) ComputeMACWithContext(ctx context.Context, data []byte) ([]byt
 
 // VerifyMAC verifies whether mac is a correct MAC for data.
 func (m *GRPCMAC) VerifyMAC(mac, data []byte) error {
-	return fmt.Errorf("not yet implemented")
+	return m.VerifyMACWithContext(context.TODO(), mac, data)
+}
+
+// VerifyMACWithContext verifies whether mac is a correct MAC for data using KMS.
+func (m *GRPCMAC) VerifyMACWithContext(ctx context.Context, mac, data []byte) error {
+	if len(data) > kmsMaxMACDataSize {
+		return fmt.Errorf("the input data (%d bytes) is larger than the allowed limit (%d bytes)", len(data), kmsMaxMACDataSize)
+	}
+	if len(mac) > kmsMaxMACSize {
+		return fmt.Errorf("the input MAC (%d bytes) is larger than the allowed limit (%d bytes)", len(mac), kmsMaxMACSize)
+	}
+
+	request := &kmspb.MacVerifyRequest{
+		Name:       m.keyName,
+		Data:       data,
+		DataCrc32C: wrapperspb.Int64(computeChecksum(data)),
+		Mac:        mac,
+		MacCrc32C:  wrapperspb.Int64(computeChecksum(mac)),
+	}
+
+	response, err := m.client.MacVerify(ctx, request)
+	if err != nil {
+		return fmt.Errorf("GCP KMS MacVerify failed: %w", err)
+	}
+
+	if response.GetName() != m.keyName {
+		return fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), m.keyName)
+	}
+	if !response.GetVerifiedDataCrc32C() {
+		return fmt.Errorf("checking the input data checksum failed")
+	}
+	if !response.GetVerifiedMacCrc32C() {
+		return fmt.Errorf("checking the MAC checksum failed")
+	}
+	if response.GetVerifiedSuccessIntegrity() != response.GetSuccess() {
+		return fmt.Errorf("checking the verification result integrity failed")
+	}
+	if !response.GetSuccess() {
+		return fmt.Errorf("MAC verification failed")
+	}
+	return nil
 }
