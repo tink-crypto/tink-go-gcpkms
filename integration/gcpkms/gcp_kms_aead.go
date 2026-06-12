@@ -99,6 +99,12 @@ func (a *gcpAEAD) Decrypt(ciphertext, associatedData []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	if !resp.VerifiedCiphertextCrc32c {
+		return nil, fmt.Errorf("KMS request for %q is missing the checksum field ciphertext_crc32c, and other information may be missing from the response. Please retry a limited number of times in case the error is transient", a.keyName)
+	}
+	if !resp.VerifiedAdditionalAuthenticatedDataCrc32c {
+		return nil, fmt.Errorf("KMS request for %q is missing the checksum field additional_authenticated_data_crc32c, and other information may be missing from the response. Please retry a limited number of times in case the error is transient", a.keyName)
+	}
 	plaintext, err := base64.StdEncoding.DecodeString(resp.Plaintext)
 	if err != nil {
 		return nil, err
