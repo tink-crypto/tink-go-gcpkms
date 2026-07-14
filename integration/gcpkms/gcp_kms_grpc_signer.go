@@ -61,8 +61,11 @@ func isSupported(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) boo
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_3072,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_4096,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44,
 		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
-		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87,
+		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S,
+		kmspb.CryptoKeyVersion_PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256:
 
 		return true
 	}
@@ -86,7 +89,9 @@ func requiresDataForSign(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgori
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_3072,
 		kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_4096,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44,
 		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87,
 		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
 
 		return true
@@ -175,7 +180,8 @@ func digestHashForAlgorithm(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlg
 		kmspb.CryptoKeyVersion_RSA_SIGN_PSS_4096_SHA256,
 		kmspb.CryptoKeyVersion_RSA_SIGN_PKCS1_2048_SHA256,
 		kmspb.CryptoKeyVersion_RSA_SIGN_PKCS1_3072_SHA256,
-		kmspb.CryptoKeyVersion_RSA_SIGN_PKCS1_4096_SHA256:
+		kmspb.CryptoKeyVersion_RSA_SIGN_PKCS1_4096_SHA256,
+		kmspb.CryptoKeyVersion_PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256:
 
 		return crypto.SHA256, nil
 	case kmspb.CryptoKeyVersion_EC_SIGN_P384_SHA384:

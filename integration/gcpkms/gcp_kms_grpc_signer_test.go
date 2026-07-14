@@ -44,10 +44,13 @@ const (
 	signKeyNameErrorWrongKeyName                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/8"
 	signKeyNameErrorUnsupportedAlgorithm            = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/9"
 	signKeyNameErrorChecksumMismatchGetPublicKey    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/10"
-	signKeyNamePQCAlgorithm                         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
-	signKeyNameErrorWrongKeyNameGetPublicKey        = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/12"
-	signKeyNamePQCAlgorithmSupportsPem              = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/13"
-	signKeyNameErrorChecksumMismatchGetPublicKeyPQC = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/14"
+	signKeyNameErrorWrongKeyNameGetPublicKey        = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
+	signKeyNameErrorChecksumMismatchGetPublicKeyPQC = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/12"
+	signKeyNameMLDSA44                              = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/13"
+	signKeyNameMLDSA65                              = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/14"
+	signKeyNameMLDSA87                              = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/15"
+	signKeyNamePureSLHDSA                           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/16"
+	signKeyNameHashSLHDSA                           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/17"
 )
 
 // expectedSignature returns the expected signature bytes for non-PQC algorithms.
@@ -62,7 +65,10 @@ func expectedPQCSignature(data []byte) []byte {
 
 // signatureForKey returns the expected signature bytes based on the key name.
 func signatureForKey(data []byte, keyName string) []byte {
-	if keyName == signKeyNamePQCAlgorithm || keyName == signKeyNamePQCAlgorithmSupportsPem {
+	switch keyName {
+	case signKeyNamePureSLHDSA, signKeyNameMLDSA44,
+		signKeyNameMLDSA65, signKeyNameMLDSA87, signKeyNameHashSLHDSA:
+
 		return []byte("pqc signature for " + string(data))
 	}
 	return []byte("signature for " + string(data))
@@ -76,6 +82,41 @@ func dataSignRequest(keyName string, data []byte) *kmspb.AsymmetricSignRequest {
 		Data:       data,
 		DataCrc32C: &wrappb.Int64Value{Value: computeChecksum(data)},
 	}
+}
+
+// sha256DigestSignRequest returns the AsymmetricSignRequest that the signer is
+// expected to send for algorithms that sign the SHA-256 digest of the data.
+func sha256DigestSignRequest(keyName string, data []byte) *kmspb.AsymmetricSignRequest {
+	digest := sha256.Sum256(data)
+	return &kmspb.AsymmetricSignRequest{
+		Name:         keyName,
+		Digest:       &kmspb.Digest{Digest: &kmspb.Digest_Sha256{Sha256: digest[:]}},
+		DigestCrc32C: &wrappb.Int64Value{Value: computeChecksum(digest[:])},
+	}
+}
+
+// pemCapablePQCPublicKey populates response for a PQC key that still supports
+// PEM (the ML-DSA family): the initial PEM request succeeds. Regular ML-DSA keys
+// are fully served by this response.
+func (s *mockKMS) pemCapablePQCPublicKey(req *kmspb.GetPublicKeyRequest, response *kmspb.PublicKey, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) *kmspb.PublicKey {
+	response.Algorithm = algorithm
+	response.PublicKeyFormat = kmspb.PublicKey_PEM
+	if req.GetPublicKeyFormat() == kmspb.PublicKey_NIST_PQC {
+		response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
+	}
+	return response
+}
+
+// nistPQCOnlyPublicKey populates response for a PQC key that only supports
+// NIST_PQC (the SLH-DSA family): PEM requests are rejected, forcing the signer
+// to retry in NIST_PQC.
+func (s *mockKMS) nistPQCOnlyPublicKey(req *kmspb.GetPublicKeyRequest, response *kmspb.PublicKey, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) (*kmspb.PublicKey, error) {
+	if req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
+		return nil, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
+	}
+	response.Algorithm = algorithm
+	response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
+	return response, nil
 }
 
 func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
@@ -124,39 +165,25 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		response.PublicKey.Crc32CChecksum.Value = 1
 		return response, nil
-	case signKeyNamePQCAlgorithm:
-		if req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
-			return nil, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
-		}
-		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S
-		response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
-		publicKeyData := []byte("pqc")
-		publicKeyCrc32c := computeChecksum(publicKeyData)
-		response.PublicKey = &kmspb.ChecksummedData{
-			Data:           publicKeyData,
-			Crc32CChecksum: &wrappb.Int64Value{Value: publicKeyCrc32c},
-		}
-		return response, nil
 	case signKeyNameErrorWrongKeyNameGetPublicKey:
 		response.Name = "wrong key name"
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
-	case signKeyNamePQCAlgorithmSupportsPem:
-		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65
-		response.PublicKeyFormat = kmspb.PublicKey_PEM
-		publicKeyData := []byte("pqc")
-		publicKeyCrc32c := computeChecksum(publicKeyData)
-		response.PublicKey = &kmspb.ChecksummedData{
-			Data:           publicKeyData,
-			Crc32CChecksum: &wrappb.Int64Value{Value: publicKeyCrc32c},
-		}
-		return response, nil
+	case signKeyNameMLDSA44:
+		return s.pemCapablePQCPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44), nil
+	case signKeyNameMLDSA65:
+		return s.pemCapablePQCPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65), nil
+	case signKeyNameMLDSA87:
+		return s.pemCapablePQCPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87), nil
+	case signKeyNamePureSLHDSA:
+		return s.nistPQCOnlyPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S)
+	case signKeyNameHashSLHDSA:
+		return s.nistPQCOnlyPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256)
 	case signKeyNameErrorChecksumMismatchGetPublicKeyPQC:
-		if req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
-			return nil, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
+		response, err := s.nistPQCOnlyPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S)
+		if err != nil {
+			return nil, err
 		}
-		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S
-		response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
 		response.PublicKey.Crc32CChecksum.Value = 1
 		return response, nil
 	default:
@@ -325,8 +352,6 @@ func TestGRPCSigner_SignWithContextFails(t *testing.T) {
 }
 
 func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
-	// Digest-mode algorithms sign the SHA-256 digest of the data.
-	digestOfData := sha256.Sum256([]byte(signData))
 	pemOnly := []kmspb.PublicKey_PublicKeyFormat{kmspb.PublicKey_PEM}
 	pemThenNISTPQC := []kmspb.PublicKey_PublicKeyFormat{kmspb.PublicKey_PEM, kmspb.PublicKey_NIST_PQC}
 	testcases := []struct {
@@ -354,32 +379,52 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			wantPublicKeyFormats: pemOnly,
 		},
 		{
-			name:          "sign digest success",
-			keyName:       signKeyNameRequiresDigest,
-			dataToSign:    []byte(signData),
-			wantSignature: expectedSignature([]byte(signDigest)),
-			wantRequest: &kmspb.AsymmetricSignRequest{
-				Name:         signKeyNameRequiresDigest,
-				Digest:       &kmspb.Digest{Digest: &kmspb.Digest_Sha256{Sha256: digestOfData[:]}},
-				DigestCrc32C: &wrappb.Int64Value{Value: computeChecksum(digestOfData[:])},
-			},
+			name:                 "sign digest success",
+			keyName:              signKeyNameRequiresDigest,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedSignature([]byte(signDigest)),
+			wantRequest:          sha256DigestSignRequest(signKeyNameRequiresDigest, []byte(signData)),
 			wantPublicKeyFormats: pemOnly,
 		},
 		{
-			name:                 "sign pqc algorithm success",
-			keyName:              signKeyNamePQCAlgorithm,
+			name:                 "sign ml-dsa-44 algorithm success",
+			keyName:              signKeyNameMLDSA44,
 			dataToSign:           []byte(signData),
 			wantSignature:        expectedPQCSignature([]byte(signData)),
-			wantRequest:          dataSignRequest(signKeyNamePQCAlgorithm, []byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNameMLDSA44, []byte(signData)),
+			wantPublicKeyFormats: pemOnly,
+		},
+		{
+			name:                 "sign ml-dsa-65 algorithm success",
+			keyName:              signKeyNameMLDSA65,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNameMLDSA65, []byte(signData)),
+			wantPublicKeyFormats: pemOnly,
+		},
+		{
+			name:                 "sign ml-dsa-87 algorithm success",
+			keyName:              signKeyNameMLDSA87,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNameMLDSA87, []byte(signData)),
+			wantPublicKeyFormats: pemOnly,
+		},
+		{
+			name:                 "sign slh-dsa algorithm success",
+			keyName:              signKeyNamePureSLHDSA,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNamePureSLHDSA, []byte(signData)),
 			wantPublicKeyFormats: pemThenNISTPQC,
 		},
 		{
-			name:                 "sign pqc algorithm supports pem",
-			keyName:              signKeyNamePQCAlgorithmSupportsPem,
+			name:                 "sign hash-slh-dsa algorithm success",
+			keyName:              signKeyNameHashSLHDSA,
 			dataToSign:           []byte(signData),
-			wantSignature:        expectedPQCSignature([]byte(signData)),
-			wantRequest:          dataSignRequest(signKeyNamePQCAlgorithmSupportsPem, []byte(signData)),
-			wantPublicKeyFormats: pemOnly,
+			wantSignature:        expectedPQCSignature([]byte(signDigest)),
+			wantRequest:          sha256DigestSignRequest(signKeyNameHashSLHDSA, []byte(signData)),
+			wantPublicKeyFormats: pemThenNISTPQC,
 		},
 	}
 
@@ -389,7 +434,7 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			signer := initializeSigner(t, mockServer, tc.keyName)
 
 			if !cmp.Equal(mockServer.getPublicKeyFormatRequests, tc.wantPublicKeyFormats) {
-				t.Errorf("GetPublicKey requests for %q had format requests = %v, want %v", tc.keyName, mockServer.getPublicKeyFormatRequests, tc.wantPublicKeyFormats)
+				t.Errorf("GetPublicKey requests for %q with formats = %v, want %v", tc.keyName, mockServer.getPublicKeyFormatRequests, tc.wantPublicKeyFormats)
 			}
 
 			gotSignature, err := signer.SignWithContext(t.Context(), tc.dataToSign)
