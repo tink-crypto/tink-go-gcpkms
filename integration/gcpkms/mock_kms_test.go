@@ -25,9 +25,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
-	kmspb "cloud.google.com/go/kms/apiv1/kmspb"  // injected by Copybara
 	// Placeholder for internal proto import.
 	kmspbgrpc "google.golang.org/genproto/googleapis/cloud/kms/v1"
+	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 )
 
 // mockKMS provides a fake KMS implementation for testing.
@@ -36,6 +36,7 @@ import (
 type mockKMS struct {
 	kmspbgrpc.UnimplementedKeyManagementServiceServer
 	getPublicKeyFormatRequests []kmspb.PublicKey_PublicKeyFormat
+	lastAsymmetricSignRequest  *kmspb.AsymmetricSignRequest
 }
 
 func setupMockKMSClient(ctx context.Context, t *testing.T, mockServer *mockKMS) *kms.KeyManagementClient {

@@ -17,12 +17,14 @@ package gcpkms
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/testing/protocmp"
 
 	// Placeholder for internal proto import.
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
@@ -30,39 +32,54 @@ import (
 )
 
 const (
-	Data                                     = "data for signing"
-	Digest                                   = "digest for signing"
-	KeyNameRequiresData1                     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/1"
-	KeyNameRequiresData2                     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/2"
-	KeyNameRequiresDigest                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/3"
-	KeyNameErrorGetPublicKey                 = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/4"
-	KeyNameErrorAsymmetricSign               = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/5"
-	KeyNameErrorCrc32c                       = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/6"
-	KeyNameErrorCrc32cNotVerified            = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/7"
-	KeyNameErrorWrongKeyName                 = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/8"
-	KeyNameErrorUnsupportedAlgorithm         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/9"
-	KeyNameErrorChecksumMismatchGetPublicKey = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/10"
-	KeyNamePqcAlgorithm                      = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
-	KeyNameErrorWrongKeyNameGetPublicKey     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/12"
-	KeyNamePqcAlgorithmSupportsPem           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/13"
+	signData                                        = "data for signing"
+	signDigest                                      = "digest for signing"
+	signKeyNameRequiresData1                        = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/1"
+	signKeyNameRequiresData2                        = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/2"
+	signKeyNameRequiresDigest                       = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/3"
+	signKeyNameErrorGetPublicKey                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/4"
+	signKeyNameErrorAsymmetricSign                  = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/5"
+	signKeyNameErrorCRC32C                          = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/6"
+	signKeyNameErrorCRC32CNotVerified               = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/7"
+	signKeyNameErrorWrongKeyName                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/8"
+	signKeyNameErrorUnsupportedAlgorithm            = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/9"
+	signKeyNameErrorChecksumMismatchGetPublicKey    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/10"
+	signKeyNamePQCAlgorithm                         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/11"
+	signKeyNameErrorWrongKeyNameGetPublicKey        = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/12"
+	signKeyNamePQCAlgorithmSupportsPem              = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/13"
+	signKeyNameErrorChecksumMismatchGetPublicKeyPQC = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/14"
 )
 
-func ExpectSign(data []byte) []byte {
+// expectedSignature returns the expected signature bytes for non-PQC algorithms.
+func expectedSignature(data []byte) []byte {
 	return []byte("signature for " + string(data))
 }
 
-func ExpectSignPQC(data []byte) []byte {
+// expectedPQCSignature returns the expected signature bytes for PQC algorithms.
+func expectedPQCSignature(data []byte) []byte {
 	return []byte("pqc signature for " + string(data))
 }
 
-func Sign(data []byte, keyName string) []byte {
-	if keyName == KeyNamePqcAlgorithm || keyName == KeyNamePqcAlgorithmSupportsPem {
+// signatureForKey returns the expected signature bytes based on the key name.
+func signatureForKey(data []byte, keyName string) []byte {
+	if keyName == signKeyNamePQCAlgorithm || keyName == signKeyNamePQCAlgorithmSupportsPem {
 		return []byte("pqc signature for " + string(data))
 	}
 	return []byte("signature for " + string(data))
 }
 
+// dataSignRequest returns the AsymmetricSignRequest that the signer is expected
+// to send for algorithms that sign the raw data.
+func dataSignRequest(keyName string, data []byte) *kmspb.AsymmetricSignRequest {
+	return &kmspb.AsymmetricSignRequest{
+		Name:       keyName,
+		Data:       data,
+		DataCrc32C: &wrappb.Int64Value{Value: computeChecksum(data)},
+	}
+}
+
 func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
+	s.getPublicKeyFormatRequests = append(s.getPublicKeyFormatRequests, req.GetPublicKeyFormat())
 	response := &kmspb.PublicKey{}
 	response.Name = req.GetName()
 	response.ProtectionLevel = kmspb.ProtectionLevel_SOFTWARE // Default protection level.
@@ -76,38 +93,38 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 	}
 
 	switch req.GetName() {
-	case KeyNameRequiresData1:
+	case signKeyNameRequiresData1:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
-	case KeyNameRequiresData2:
+	case signKeyNameRequiresData2:
 		response.ProtectionLevel = kmspb.ProtectionLevel_EXTERNAL
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_PSS_2048_SHA256
 		return response, nil
-	case KeyNameRequiresDigest:
+	case signKeyNameRequiresDigest:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_PSS_2048_SHA256
 		return response, nil
-	case KeyNameErrorGetPublicKey:
+	case signKeyNameErrorGetPublicKey:
 		return nil, status.Error(codes.Internal, "Internal error")
-	case KeyNameErrorAsymmetricSign:
+	case signKeyNameErrorAsymmetricSign:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
-	case KeyNameErrorCrc32c:
+	case signKeyNameErrorCRC32C:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
-	case KeyNameErrorCrc32cNotVerified:
+	case signKeyNameErrorCRC32CNotVerified:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
-	case KeyNameErrorWrongKeyName:
+	case signKeyNameErrorWrongKeyName:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
-	case KeyNameErrorUnsupportedAlgorithm:
+	case signKeyNameErrorUnsupportedAlgorithm:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_2048_SHA256
 		return response, nil
-	case KeyNameErrorChecksumMismatchGetPublicKey:
+	case signKeyNameErrorChecksumMismatchGetPublicKey:
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		response.PublicKey.Crc32CChecksum.Value = 1
 		return response, nil
-	case KeyNamePqcAlgorithm:
+	case signKeyNamePQCAlgorithm:
 		if req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
 			return nil, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
 		}
@@ -120,17 +137,13 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 			Crc32CChecksum: &wrappb.Int64Value{Value: publicKeyCrc32c},
 		}
 		return response, nil
-	case KeyNameErrorWrongKeyNameGetPublicKey:
+	case signKeyNameErrorWrongKeyNameGetPublicKey:
 		response.Name = "wrong key name"
 		response.Algorithm = kmspb.CryptoKeyVersion_RSA_SIGN_RAW_PKCS1_2048
 		return response, nil
-	case KeyNamePqcAlgorithmSupportsPem:
-		s.getPublicKeyFormatRequests = append(s.getPublicKeyFormatRequests, req.GetPublicKeyFormat())
+	case signKeyNamePQCAlgorithmSupportsPem:
 		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65
 		response.PublicKeyFormat = kmspb.PublicKey_PEM
-		if req.GetPublicKeyFormat() == kmspb.PublicKey_NIST_PQC {
-			response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
-		}
 		publicKeyData := []byte("pqc")
 		publicKeyCrc32c := computeChecksum(publicKeyData)
 		response.PublicKey = &kmspb.ChecksummedData{
@@ -138,13 +151,22 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 			Crc32CChecksum: &wrappb.Int64Value{Value: publicKeyCrc32c},
 		}
 		return response, nil
+	case signKeyNameErrorChecksumMismatchGetPublicKeyPQC:
+		if req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
+			return nil, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
+		}
+		response.Algorithm = kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S
+		response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
+		response.PublicKey.Crc32CChecksum.Value = 1
+		return response, nil
 	default:
 		return nil, status.Error(codes.NotFound, "Key not found")
 	}
 }
 
 func (s *mockKMS) AsymmetricSign(ctx context.Context, req *kmspb.AsymmetricSignRequest) (*kmspb.AsymmetricSignResponse, error) {
-	if req.GetName() == KeyNameErrorAsymmetricSign {
+	s.lastAsymmetricSignRequest = req
+	if req.GetName() == signKeyNameErrorAsymmetricSign {
 		return nil, status.Error(codes.Internal, "Internal error")
 	}
 	response := &kmspb.AsymmetricSignResponse{
@@ -152,24 +174,25 @@ func (s *mockKMS) AsymmetricSign(ctx context.Context, req *kmspb.AsymmetricSignR
 	}
 	if req.GetDigest() != nil {
 		response.VerifiedDigestCrc32C = true
-		response.Signature = Sign([]byte(Digest), req.GetName())
+		response.Signature = signatureForKey([]byte(signDigest), req.GetName())
 	} else {
 		response.VerifiedDataCrc32C = true
-		response.Signature = Sign(req.GetData(), req.GetName())
+		response.Signature = signatureForKey(req.GetData(), req.GetName())
 	}
 	response.SignatureCrc32C = &wrappb.Int64Value{Value: computeChecksum(response.GetSignature())}
 	switch req.GetName() {
-	case KeyNameErrorWrongKeyName:
+	case signKeyNameErrorWrongKeyName:
 		response.Name = "wrong key name"
-	case KeyNameErrorCrc32c:
+	case signKeyNameErrorCRC32C:
 		response.SignatureCrc32C = &wrappb.Int64Value{Value: 1}
-	case KeyNameErrorCrc32cNotVerified:
+	case signKeyNameErrorCRC32CNotVerified:
 		response.VerifiedDataCrc32C = false
 		response.VerifiedDigestCrc32C = false
 	}
 	return response, nil
 }
 
+// initializeSigner sets up a mock KMS client and returns a new GRPCSigner for testing.
 func initializeSigner(t *testing.T, mockServer *mockKMS, keyName string) *GRPCSigner {
 	t.Helper()
 	gcpKMSClient := setupMockKMSClient(t.Context(), t, mockServer)
@@ -180,20 +203,19 @@ func initializeSigner(t *testing.T, mockServer *mockKMS, keyName string) *GRPCSi
 	return signer
 }
 
-func TestNewGRPCSigner_NilKmsClientFails(t *testing.T) {
-	_, err := NewGRPCSigner(t.Context(), KeyNameRequiresData1, nil)
+func TestNewGRPCSigner_NilKMSClientFails(t *testing.T) {
+	_, err := NewGRPCSigner(t.Context(), signKeyNameRequiresData1, nil)
 	if err == nil {
-		t.Errorf("NewGRPCSigner succeeded, want error")
+		t.Errorf("NewGRPCSigner(_, nil) succeeded, want error")
 	}
 }
 
 func TestNewGRPCSigner_Fails(t *testing.T) {
-	type testCase struct {
+	testcases := []struct {
 		name    string
 		keyName string
 		wantErr string
-	}
-	testcases := []testCase{
+	}{
 		{
 			name:    "empty key name",
 			keyName: "",
@@ -206,22 +228,27 @@ func TestNewGRPCSigner_Fails(t *testing.T) {
 		},
 		{
 			name:    "get public key fails",
-			keyName: KeyNameErrorGetPublicKey,
+			keyName: signKeyNameErrorGetPublicKey,
 			wantErr: "GCP KMS GetPublicKey failed",
 		},
 		{
 			name:    "unsupported algorithm",
-			keyName: KeyNameErrorUnsupportedAlgorithm,
+			keyName: signKeyNameErrorUnsupportedAlgorithm,
 			wantErr: "is not supported",
 		},
 		{
 			name:    "checksum mismatch get public key",
-			keyName: KeyNameErrorChecksumMismatchGetPublicKey,
+			keyName: signKeyNameErrorChecksumMismatchGetPublicKey,
+			wantErr: "checksum verification failed",
+		},
+		{
+			name:    "checksum mismatch get public key pqc",
+			keyName: signKeyNameErrorChecksumMismatchGetPublicKeyPQC,
 			wantErr: "checksum verification failed",
 		},
 		{
 			name:    "wrong key name get public key",
-			keyName: KeyNameErrorWrongKeyNameGetPublicKey,
+			keyName: signKeyNameErrorWrongKeyNameGetPublicKey,
 			wantErr: "does not match the requested key name",
 		},
 	}
@@ -243,41 +270,40 @@ func TestNewGRPCSigner_Fails(t *testing.T) {
 }
 
 func TestGRPCSigner_SignWithContextFails(t *testing.T) {
-	type testCase struct {
+	testcases := []struct {
 		name       string
 		keyName    string
 		dataToSign []byte
 		wantErr    string
-	}
-	testcases := []testCase{
+	}{
 		{
 			name:       "asymmetric sign fails",
-			keyName:    KeyNameErrorAsymmetricSign,
-			dataToSign: []byte(Data),
+			keyName:    signKeyNameErrorAsymmetricSign,
+			dataToSign: []byte(signData),
 			wantErr:    "GCP KMS AsymmetricSign failed",
 		},
 		{
 			name:       "input checksum fails",
-			keyName:    KeyNameErrorCrc32cNotVerified,
-			dataToSign: []byte(Data),
+			keyName:    signKeyNameErrorCRC32CNotVerified,
+			dataToSign: []byte(signData),
 			wantErr:    "checking the input checksum failed",
 		},
 		{
 			name:       "signature checksum mismatch",
-			keyName:    KeyNameErrorCrc32c,
-			dataToSign: []byte(Data),
+			keyName:    signKeyNameErrorCRC32C,
+			dataToSign: []byte(signData),
 			wantErr:    "signature checksum mismatch",
 		},
 		{
 			name:       "oversized input data",
-			keyName:    KeyNameRequiresData1,
+			keyName:    signKeyNameRequiresData1,
 			dataToSign: bytes.Repeat([]byte("A"), 64*1024+1),
 			wantErr:    "is larger than",
 		},
 		{
 			name:       "mismatched key name in response",
-			keyName:    KeyNameErrorWrongKeyName,
-			dataToSign: []byte(Data),
+			keyName:    signKeyNameErrorWrongKeyName,
+			dataToSign: []byte(signData),
 			wantErr:    "does not match the requested key name",
 		},
 	}
@@ -299,42 +325,61 @@ func TestGRPCSigner_SignWithContextFails(t *testing.T) {
 }
 
 func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
-	type testCase struct {
-		name          string
-		keyName       string
-		dataToSign    []byte
-		wantSignature []byte
-	}
-	testcases := []testCase{
+	// Digest-mode algorithms sign the SHA-256 digest of the data.
+	digestOfData := sha256.Sum256([]byte(signData))
+	pemOnly := []kmspb.PublicKey_PublicKeyFormat{kmspb.PublicKey_PEM}
+	pemThenNISTPQC := []kmspb.PublicKey_PublicKeyFormat{kmspb.PublicKey_PEM, kmspb.PublicKey_NIST_PQC}
+	testcases := []struct {
+		name                 string
+		keyName              string
+		dataToSign           []byte
+		wantSignature        []byte
+		wantRequest          *kmspb.AsymmetricSignRequest
+		wantPublicKeyFormats []kmspb.PublicKey_PublicKeyFormat
+	}{
 		{
-			name:          "sign data on algorithm success",
-			keyName:       KeyNameRequiresData1,
-			dataToSign:    []byte(Data),
-			wantSignature: ExpectSign([]byte(Data)),
+			name:                 "sign data on algorithm success",
+			keyName:              signKeyNameRequiresData1,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedSignature([]byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNameRequiresData1, []byte(signData)),
+			wantPublicKeyFormats: pemOnly,
 		},
 		{
-			name:          "sign data on protection level success",
-			keyName:       KeyNameRequiresData2,
-			dataToSign:    []byte(Data),
-			wantSignature: ExpectSign([]byte(Data)),
+			name:                 "sign data on protection level success",
+			keyName:              signKeyNameRequiresData2,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedSignature([]byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNameRequiresData2, []byte(signData)),
+			wantPublicKeyFormats: pemOnly,
 		},
 		{
 			name:          "sign digest success",
-			keyName:       KeyNameRequiresDigest,
-			dataToSign:    []byte(Data),
-			wantSignature: ExpectSign([]byte(Digest)),
+			keyName:       signKeyNameRequiresDigest,
+			dataToSign:    []byte(signData),
+			wantSignature: expectedSignature([]byte(signDigest)),
+			wantRequest: &kmspb.AsymmetricSignRequest{
+				Name:         signKeyNameRequiresDigest,
+				Digest:       &kmspb.Digest{Digest: &kmspb.Digest_Sha256{Sha256: digestOfData[:]}},
+				DigestCrc32C: &wrappb.Int64Value{Value: computeChecksum(digestOfData[:])},
+			},
+			wantPublicKeyFormats: pemOnly,
 		},
 		{
-			name:          "sign pqc algorithm success",
-			keyName:       KeyNamePqcAlgorithm,
-			dataToSign:    []byte(Data),
-			wantSignature: ExpectSignPQC([]byte(Data)),
+			name:                 "sign pqc algorithm success",
+			keyName:              signKeyNamePQCAlgorithm,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNamePQCAlgorithm, []byte(signData)),
+			wantPublicKeyFormats: pemThenNISTPQC,
 		},
 		{
-			name:          "sign pqc algorithm supports pem",
-			keyName:       KeyNamePqcAlgorithmSupportsPem,
-			dataToSign:    []byte(Data),
-			wantSignature: ExpectSignPQC([]byte(Data)),
+			name:                 "sign pqc algorithm supports pem",
+			keyName:              signKeyNamePQCAlgorithmSupportsPem,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signData)),
+			wantRequest:          dataSignRequest(signKeyNamePQCAlgorithmSupportsPem, []byte(signData)),
+			wantPublicKeyFormats: pemOnly,
 		},
 	}
 
@@ -343,21 +388,20 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			mockServer := &mockKMS{}
 			signer := initializeSigner(t, mockServer, tc.keyName)
 
-			if tc.keyName == KeyNamePqcAlgorithmSupportsPem {
-				want := []kmspb.PublicKey_PublicKeyFormat{kmspb.PublicKey_PEM, kmspb.PublicKey_NIST_PQC}
-				if !cmp.Equal(mockServer.getPublicKeyFormatRequests, want) {
-					t.Errorf("GetPublicKey requests for %s with formats = %v, want %v", tc.keyName, mockServer.getPublicKeyFormatRequests, want)
-				}
+			if !cmp.Equal(mockServer.getPublicKeyFormatRequests, tc.wantPublicKeyFormats) {
+				t.Errorf("GetPublicKey requests for %q had format requests = %v, want %v", tc.keyName, mockServer.getPublicKeyFormatRequests, tc.wantPublicKeyFormats)
 			}
 
 			gotSignature, err := signer.SignWithContext(t.Context(), tc.dataToSign)
 			if err != nil {
-				t.Errorf("signer.SignWithContext(%q) error = %v, want nil", string(tc.dataToSign), err)
+				t.Errorf("signer.SignWithContext(%q) error = %v, want nil", tc.dataToSign, err)
 			}
 			if !bytes.Equal(gotSignature, tc.wantSignature) {
-				t.Errorf("signer.SignWithContext(%q) = %v, want %v", string(tc.dataToSign), string(gotSignature), string(tc.wantSignature))
+				t.Errorf("signer.SignWithContext(%q) = %q, want %q", tc.dataToSign, gotSignature, tc.wantSignature)
 			}
-
+			if diff := cmp.Diff(tc.wantRequest, mockServer.lastAsymmetricSignRequest, protocmp.Transform()); diff != "" {
+				t.Errorf("AsymmetricSign request for %q mismatch (-want +got):\n%s", tc.keyName, diff)
+			}
 		})
 	}
 }

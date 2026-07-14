@@ -22,24 +22,28 @@ import (
 	"strings"
 
 	"cloud.google.com/go/kms/apiv1"
+	"github.com/tink-crypto/tink-go/v2/tink"
 
 	// Placeholder for internal proto import.
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// GRPCSigner represent a GCP GRPC-based KMS client to a particular key URI.
+// GRPCSigner represents a GCP gRPC-based KMS client for a particular key URI.
 type GRPCSigner struct {
 	keyName   string
 	kms       *kms.KeyManagementClient
 	publicKey *kmspb.PublicKey
 }
 
-// Maximum size of the data that can be signed.
-var kmsMaxSignDataSize = 64 * 1024
+var _ tink.Signer = (*GRPCSigner)(nil)
 
-var errorChecksumMismatch = errors.New("checksum verification failed")
+// kmsMaxSignDataSize represents the maximum size of the data that can be signed.
+const kmsMaxSignDataSize = 64 * 1024
 
+var errChecksumMismatch = errors.New("checksum verification failed")
+
+// isSupported reports whether the given algorithm is supported for signing.
 func isSupported(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) bool {
 	switch algorithm {
 	case kmspb.CryptoKeyVersion_EC_SIGN_ED25519,
@@ -71,20 +75,11 @@ func useNISTPQCFormat(response *kmspb.PublicKey, err error) bool {
 	if err != nil && strings.Contains(err.Error(), "Only NIST_PQC format is supported") {
 		return true
 	}
-	if err == nil {
-		switch response.GetAlgorithm() {
-		case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
-			kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
-
-			return true
-		}
-	}
 	return false
 }
 
-// Some AsymmetricSign algorithms require data as input and some other
-// operate on a digest of the data. This method determines if data itself is
-// required for signing and returns true if so.
+// requiresDataForSign reports whether the given algorithm and protection level require
+// raw data as signing input rather than a computed digest.
 func requiresDataForSign(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, protectionLevel kmspb.ProtectionLevel) bool {
 	switch algorithm {
 	case kmspb.CryptoKeyVersion_EC_SIGN_ED25519,
@@ -103,11 +98,11 @@ func requiresDataForSign(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgori
 	return false
 }
 
-// tryGetPublicKey tries to get the public key for the given key name.
-// Requires that the request explicitly specifies the key format.
+// tryGetPublicKey attempts to get the public key for the given key name.
+// It requires that the request explicitly specify the key format.
 func tryGetPublicKey(ctx context.Context, kms *kms.KeyManagementClient, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
 	if req.GetPublicKeyFormat() == kmspb.PublicKey_PUBLIC_KEY_FORMAT_UNSPECIFIED {
-		return nil, fmt.Errorf("public key format is required")
+		return nil, errors.New("public key format is required")
 	}
 	response, err := kms.GetPublicKey(ctx, req)
 	if err != nil {
@@ -116,7 +111,7 @@ func tryGetPublicKey(ctx context.Context, kms *kms.KeyManagementClient, req *kms
 	checksumReceived := response.GetPublicKey().GetCrc32CChecksum().GetValue()
 	checksumCalculated := computeChecksum(response.GetPublicKey().GetData())
 	if checksumReceived != checksumCalculated {
-		return nil, fmt.Errorf("%w: recieved %d, calculated %d", errorChecksumMismatch, checksumReceived, checksumCalculated)
+		return nil, fmt.Errorf("%w: received %d, calculated %d", errChecksumMismatch, checksumReceived, checksumCalculated)
 	}
 	return response, nil
 }
@@ -130,11 +125,11 @@ func getPublicKey(ctx context.Context, keyName string, kms *kms.KeyManagementCli
 	// is transient, following the guidelines in https://cloud.google.com/kms/docs/data-integrity-guidelines
 	for i := 0; i < 3; i++ {
 		response, err = tryGetPublicKey(ctx, kms, req)
-		if useNISTPQCFormat(response, err) {
+		if req.PublicKeyFormat != kmspb.PublicKey_NIST_PQC && useNISTPQCFormat(response, err) {
 			req.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
 			response, err = tryGetPublicKey(ctx, kms, req)
 		}
-		if err != nil && errors.Is(err, errorChecksumMismatch) {
+		if err != nil && errors.Is(err, errChecksumMismatch) {
 			continue
 		}
 		break
@@ -154,7 +149,7 @@ func NewGRPCSigner(ctx context.Context, keyName string, kms *kms.KeyManagementCl
 		return nil, err
 	}
 	if kms == nil {
-		return nil, fmt.Errorf("kms client cannot be nil")
+		return nil, errors.New("kms client cannot be nil")
 	}
 	publicKey, err := getPublicKey(ctx, keyName, kms)
 	if err != nil {
@@ -170,6 +165,7 @@ func NewGRPCSigner(ctx context.Context, keyName string, kms *kms.KeyManagementCl
 	}, nil
 }
 
+// digestHashForAlgorithm returns the crypto.Hash associated with the given KMS algorithm.
 func digestHashForAlgorithm(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) (crypto.Hash, error) {
 	switch algorithm {
 	case kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256,
@@ -223,6 +219,7 @@ func calculateDigest(data []byte, algorithm kmspb.CryptoKeyVersion_CryptoKeyVers
 	return digest, checksum, nil
 }
 
+// buildAsymmetricSignRequest constructs an AsymmetricSignRequest for the given data and key parameters.
 func buildAsymmetricSignRequest(keyName string, data []byte, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, protectionLevel kmspb.ProtectionLevel) (*kmspb.AsymmetricSignRequest, error) {
 	request := &kmspb.AsymmetricSignRequest{Name: keyName}
 	if requiresDataForSign(algorithm, protectionLevel) {
@@ -242,36 +239,41 @@ func buildAsymmetricSignRequest(keyName string, data []byte, algorithm kmspb.Cry
 	return request, nil
 }
 
+// Sign calls KMS to sign the input data and returns the signature.
+func (s *GRPCSigner) Sign(data []byte) ([]byte, error) {
+	return s.SignWithContext(context.TODO(), data)
+}
+
 // SignWithContext calls KMS to sign the input data and returns the signature.
-func (signer *GRPCSigner) SignWithContext(ctx context.Context, data []byte) ([]byte, error) {
+func (s *GRPCSigner) SignWithContext(ctx context.Context, data []byte) ([]byte, error) {
 	if len(data) > kmsMaxSignDataSize {
 		return nil, fmt.Errorf("the input data (%d bytes) is larger than the allowed limit (%d bytes)", len(data), kmsMaxSignDataSize)
 	}
 
-	request, err := buildAsymmetricSignRequest(signer.keyName, data, signer.publicKey.GetAlgorithm(), signer.publicKey.GetProtectionLevel())
+	request, err := buildAsymmetricSignRequest(s.keyName, data, s.publicKey.GetAlgorithm(), s.publicKey.GetProtectionLevel())
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := signer.kms.AsymmetricSign(ctx, request)
+	response, err := s.kms.AsymmetricSign(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("GCP KMS AsymmetricSign failed: %w", err)
 	}
 
 	// Perform integrity checks
-	if response.GetName() != signer.keyName {
-		return nil, fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), signer.keyName)
+	if response.GetName() != s.keyName {
+		return nil, fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), s.keyName)
 	}
 
 	// Since we only request data OR digest for signing, we expect that exactly
 	// one of the checksum fields is verified.
 	if !response.GetVerifiedDataCrc32C() && !response.GetVerifiedDigestCrc32C() {
-		return nil, fmt.Errorf("checking the input checksum failed: %w", err)
+		return nil, errors.New("checking the input checksum failed")
 	}
 
 	computedChecksumSignature := computeChecksum(response.GetSignature())
 	if response.GetSignatureCrc32C().GetValue() != computedChecksumSignature {
-		return nil, fmt.Errorf("signature checksum mismatch: %w", err)
+		return nil, errors.New("signature checksum mismatch")
 	}
 
 	return response.GetSignature(), nil
