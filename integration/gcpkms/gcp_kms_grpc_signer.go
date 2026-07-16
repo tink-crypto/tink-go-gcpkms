@@ -229,6 +229,9 @@ func calculateDigest(data []byte, algorithm kmspb.CryptoKeyVersion_CryptoKeyVers
 func buildAsymmetricSignRequest(keyName string, data []byte, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, protectionLevel kmspb.ProtectionLevel) (*kmspb.AsymmetricSignRequest, error) {
 	request := &kmspb.AsymmetricSignRequest{Name: keyName}
 	if requiresDataForSign(algorithm, protectionLevel) {
+		if len(data) > kmsMaxSignDataSize {
+			return nil, fmt.Errorf("the input data (%d bytes) is larger than the allowed limit (%d bytes)", len(data), kmsMaxSignDataSize)
+		}
 		request.Data = data
 		checksum := computeChecksum(data)
 		request.DataCrc32C = &wrapperspb.Int64Value{Value: checksum}
@@ -252,10 +255,6 @@ func (s *GRPCSigner) Sign(data []byte) ([]byte, error) {
 
 // SignWithContext calls KMS to sign the input data and returns the signature.
 func (s *GRPCSigner) SignWithContext(ctx context.Context, data []byte) ([]byte, error) {
-	if len(data) > kmsMaxSignDataSize {
-		return nil, fmt.Errorf("the input data (%d bytes) is larger than the allowed limit (%d bytes)", len(data), kmsMaxSignDataSize)
-	}
-
 	request, err := buildAsymmetricSignRequest(s.keyName, data, s.publicKey.GetAlgorithm(), s.publicKey.GetProtectionLevel())
 	if err != nil {
 		return nil, err

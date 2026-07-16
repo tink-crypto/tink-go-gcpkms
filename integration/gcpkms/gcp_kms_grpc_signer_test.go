@@ -387,6 +387,14 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			wantPublicKeyFormats: pemOnly,
 		},
 		{
+			name:                 "sign large data success for digest based algorithm",
+			keyName:              signKeyNameRequiresDigest,
+			dataToSign:           bytes.Repeat([]byte("A"), 64*1024+1),
+			wantSignature:        expectedSignature([]byte(signDigest)),
+			wantRequest:          sha256DigestSignRequest(signKeyNameRequiresDigest, bytes.Repeat([]byte("A"), 64*1024+1)),
+			wantPublicKeyFormats: pemOnly,
+		},
+		{
 			name:                 "sign ml-dsa-44 algorithm success",
 			keyName:              signKeyNameMLDSA44,
 			dataToSign:           []byte(signData),
