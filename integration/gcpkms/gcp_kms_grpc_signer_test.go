@@ -18,6 +18,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/sha3"
+	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 
@@ -51,6 +54,10 @@ const (
 	signKeyNameMLDSA87                              = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/15"
 	signKeyNamePureSLHDSA                           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/16"
 	signKeyNameHashSLHDSA                           = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/17"
+	signKeyNameMLDSA44ExternalMu                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/18"
+	signKeyNameMLDSA65ExternalMu                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/19"
+	signKeyNameMLDSA87ExternalMu                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/20"
+	signKeyNameMLDSAExternalMuInvalidKey            = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K1/cryptoKeyVersions/21"
 )
 
 // expectedSignature returns the expected signature bytes for non-PQC algorithms.
@@ -67,7 +74,8 @@ func expectedPQCSignature(data []byte) []byte {
 func signatureForKey(data []byte, keyName string) []byte {
 	switch keyName {
 	case signKeyNamePureSLHDSA, signKeyNameMLDSA44,
-		signKeyNameMLDSA65, signKeyNameMLDSA87, signKeyNameHashSLHDSA:
+		signKeyNameMLDSA65, signKeyNameMLDSA87, signKeyNameHashSLHDSA,
+		signKeyNameMLDSA44ExternalMu, signKeyNameMLDSA65ExternalMu, signKeyNameMLDSA87ExternalMu:
 
 		return []byte("pqc signature for " + string(data))
 	}
@@ -95,9 +103,34 @@ func sha256DigestSignRequest(keyName string, data []byte) *kmspb.AsymmetricSignR
 	}
 }
 
+// mldsaTestPublicKey returns deterministic bytes of the given size to stand in
+// for an encoded ML-DSA public key. The signer only checks the length and hashes
+// the bytes, so a real key is unnecessary.
+func mldsaTestPublicKey(size int) []byte {
+	key := make([]byte, size)
+	for i := range key {
+		key[i] = byte(i % 251)
+	}
+	return key
+}
+
+// externalMuSignRequest returns the AsymmetricSignRequest that the signer is
+// expected to send for external-mu ML-DSA algorithms, which sign the SHAKE-256
+// message representative (μ) of the data.
+func externalMuSignRequest(keyName string, publicKeyBytes, data []byte) *kmspb.AsymmetricSignRequest {
+	tr := sha3.SumSHAKE256(publicKeyBytes, mldsaPublicKeyHashBytes)
+	mu := computeMLDSAExternalMu(tr, data)
+	return &kmspb.AsymmetricSignRequest{
+		Name:         keyName,
+		Digest:       &kmspb.Digest{Digest: &kmspb.Digest_ExternalMu{ExternalMu: mu}},
+		DigestCrc32C: &wrappb.Int64Value{Value: computeChecksum(mu)},
+	}
+}
+
 // pemCapablePQCPublicKey populates response for a PQC key that still supports
 // PEM (the ML-DSA family): the initial PEM request succeeds. Regular ML-DSA keys
-// are fully served by this response.
+// are fully served by this response, while external-mu keys are additionally
+// re-fetched in NIST_PQC to obtain the raw public key bytes (see externalMuPublicKey).
 func (s *mockKMS) pemCapablePQCPublicKey(req *kmspb.GetPublicKeyRequest, response *kmspb.PublicKey, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) *kmspb.PublicKey {
 	response.Algorithm = algorithm
 	response.PublicKeyFormat = kmspb.PublicKey_PEM
@@ -117,6 +150,19 @@ func (s *mockKMS) nistPQCOnlyPublicKey(req *kmspb.GetPublicKeyRequest, response 
 	response.Algorithm = algorithm
 	response.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
 	return response, nil
+}
+
+// externalMuPublicKey populates response for an external-mu ML-DSA key. Like the
+// rest of the ML-DSA family it supports PEM and is re-fetched in NIST_PQC, but
+// the signer also needs the raw public key bytes to compute μ, so it returns a
+// correctly-sized key with a matching checksum.
+func (s *mockKMS) externalMuPublicKey(req *kmspb.GetPublicKeyRequest, response *kmspb.PublicKey, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, publicKeyBytes []byte) *kmspb.PublicKey {
+	response = s.pemCapablePQCPublicKey(req, response, algorithm)
+	response.PublicKey = &kmspb.ChecksummedData{
+		Data:           publicKeyBytes,
+		Crc32CChecksum: &wrappb.Int64Value{Value: computeChecksum(publicKeyBytes)},
+	}
+	return response
 }
 
 func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
@@ -179,6 +225,15 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 		return s.nistPQCOnlyPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S)
 	case signKeyNameHashSLHDSA:
 		return s.nistPQCOnlyPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256)
+	case signKeyNameMLDSA44ExternalMu:
+		return s.externalMuPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU, mldsaTestPublicKey(mldsa44PublicKeyBytes)), nil
+	case signKeyNameMLDSA65ExternalMu:
+		return s.externalMuPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU, mldsaTestPublicKey(mldsa65PublicKeyBytes)), nil
+	case signKeyNameMLDSA87ExternalMu:
+		return s.externalMuPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU, mldsaTestPublicKey(mldsa87PublicKeyBytes)), nil
+	case signKeyNameMLDSAExternalMuInvalidKey:
+		// A wrong-sized public key makes the signer fail the size check at construction.
+		return s.externalMuPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU, mldsaTestPublicKey(mldsa65PublicKeyBytes-1)), nil
 	case signKeyNameErrorChecksumMismatchGetPublicKeyPQC:
 		response, err := s.nistPQCOnlyPublicKey(req, response, kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S)
 		if err != nil {
@@ -277,6 +332,11 @@ func TestNewGRPCSigner_Fails(t *testing.T) {
 			name:    "wrong key name get public key",
 			keyName: signKeyNameErrorWrongKeyNameGetPublicKey,
 			wantErr: "does not match the requested key name",
+		},
+		{
+			name:    "ml-dsa external-mu invalid key size",
+			keyName: signKeyNameMLDSAExternalMuInvalidKey,
+			wantErr: "incorrect public key size",
 		},
 	}
 
@@ -434,6 +494,30 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			wantRequest:          sha256DigestSignRequest(signKeyNameHashSLHDSA, []byte(signData)),
 			wantPublicKeyFormats: pemThenNISTPQC,
 		},
+		{
+			name:                 "sign ml-dsa-44 external-mu algorithm success",
+			keyName:              signKeyNameMLDSA44ExternalMu,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signDigest)),
+			wantRequest:          externalMuSignRequest(signKeyNameMLDSA44ExternalMu, mldsaTestPublicKey(mldsa44PublicKeyBytes), []byte(signData)),
+			wantPublicKeyFormats: pemThenNISTPQC,
+		},
+		{
+			name:                 "sign ml-dsa-65 external-mu algorithm success",
+			keyName:              signKeyNameMLDSA65ExternalMu,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signDigest)),
+			wantRequest:          externalMuSignRequest(signKeyNameMLDSA65ExternalMu, mldsaTestPublicKey(mldsa65PublicKeyBytes), []byte(signData)),
+			wantPublicKeyFormats: pemThenNISTPQC,
+		},
+		{
+			name:                 "sign ml-dsa-87 external-mu algorithm success",
+			keyName:              signKeyNameMLDSA87ExternalMu,
+			dataToSign:           []byte(signData),
+			wantSignature:        expectedPQCSignature([]byte(signDigest)),
+			wantRequest:          externalMuSignRequest(signKeyNameMLDSA87ExternalMu, mldsaTestPublicKey(mldsa87PublicKeyBytes), []byte(signData)),
+			wantPublicKeyFormats: pemThenNISTPQC,
+		},
 	}
 
 	for _, tc := range testcases {
@@ -454,6 +538,105 @@ func TestGRPCSigner_SignWithContextSuccess(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.wantRequest, mockServer.lastAsymmetricSignRequest, protocmp.Transform()); diff != "" {
 				t.Errorf("AsymmetricSign request for %q mismatch (-want +got):\n%s", tc.keyName, diff)
+			}
+		})
+	}
+
+}
+
+func mustHexDecode(t *testing.T, input string) []byte {
+	t.Helper()
+	result, err := hex.DecodeString(input)
+	if err != nil {
+		t.Fatalf("hex.DecodeString(%q) error = %v", input, err)
+	}
+	return result
+}
+
+func TestComputeMLDSAExternalMu(t *testing.T) {
+	// Known-answer vectors for μ = SHAKE256(SHAKE256(pk, 64) || 0x00 || 0x00 || data, 64)
+	// (FIPS-204 §6.2, empty context), where the vectors were computed independently with Python's
+	// hashlib.shake_256 over pk = mlDsaTestPublicKey(pkSize) and data = signData.
+	testcases := []struct {
+		name      string
+		algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm
+		pkSize    int
+		wantMu    []byte
+	}{
+		{
+			name:      "ml-dsa-44",
+			algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU,
+			pkSize:    mldsa44PublicKeyBytes,
+			wantMu:    mustHexDecode(t, "4856f58825ea886142257740202561dd56c874fe50c7fa2644fcb76149544bffa1e8e35b5d34d3760078244ea348b08173fc6f6ca3ccfbb87e6d230cb6054130"),
+		},
+		{
+			name:      "ml-dsa-65",
+			algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU,
+			pkSize:    mldsa65PublicKeyBytes,
+			wantMu:    mustHexDecode(t, "8af79318b6d333d59890db6895be53bcfc663970a1fd4a228fdcc2fac916475ca4778038298e2f2661f9437d819756579a5a91f9a16c7475e0193e7068b99e51"),
+		},
+		{
+			name:      "ml-dsa-87",
+			algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU,
+			pkSize:    mldsa87PublicKeyBytes,
+			wantMu:    mustHexDecode(t, "e6306d86c4ef1b8f03aa4a9c4c1c50bcbc580ac5209ecc714fc4a08b7b4265a75322712923d71c2fb203a85944e09b44f0e3c7d90d7b43ad6c3145466cd6a858"),
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			publicKey := &kmspb.PublicKey{
+				Algorithm: tc.algorithm,
+				PublicKey: &kmspb.ChecksummedData{Data: mldsaTestPublicKey(tc.pkSize)},
+			}
+			tr, err := computeMLDSAPublicKeyHash(publicKey)
+			if err != nil {
+				t.Fatalf("computeMLDSAPublicKeyHash(%v) error = %v, want nil", tc.algorithm, err)
+			}
+			gotMu := computeMLDSAExternalMu(tr, []byte(signData))
+			if !bytes.Equal(gotMu, tc.wantMu) {
+				t.Errorf("computeMLDSAExternalMu(tr, %q) = %x, want %x", signData, gotMu, tc.wantMu)
+			}
+		})
+	}
+}
+
+func TestUseNISTPQCFormat(t *testing.T) {
+	testCases := []struct {
+		name     string
+		response *kmspb.PublicKey
+		err      error
+		want     bool
+	}{
+		{
+			name:     "error requiring NIST_PQC format",
+			response: nil,
+			err:      errors.New("Only NIST_PQC format is supported for PQC algorithms"),
+			want:     true,
+		},
+		{
+			name:     "unrelated error with external-mu response (must not return true)",
+			response: &kmspb.PublicKey{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU},
+			err:      errors.New("unrelated KMS error"),
+			want:     false,
+		},
+		{
+			name:     "no error with external-mu response",
+			response: &kmspb.PublicKey{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU},
+			err:      nil,
+			want:     true,
+		},
+		{
+			name:     "no error with regular ML-DSA response",
+			response: &kmspb.PublicKey{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44},
+			err:      nil,
+			want:     false,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := useNISTPQCFormat(tc.response, tc.err); got != tc.want {
+				t.Errorf("useNISTPQCFormat() = %v, want %v", got, tc.want)
 			}
 		})
 	}

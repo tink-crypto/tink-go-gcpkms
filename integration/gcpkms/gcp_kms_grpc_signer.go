@@ -17,6 +17,7 @@ package gcpkms
 import (
 	"context"
 	"crypto"
+	"crypto/sha3"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,11 +30,24 @@ import (
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
+const (
+	mldsa44PublicKeyBytes = 1312
+	mldsa65PublicKeyBytes = 1952
+	mldsa87PublicKeyBytes = 2592
+	// mldsaPublicKeyHashBytes is the size in bytes of tr = SHAKE256(public key, 64).
+	mldsaPublicKeyHashBytes = 64
+	// mldsaMuBytes is the size in bytes of the ML-DSA external-mu message representative (μ).
+	mldsaMuBytes = 64
+)
+
 // GRPCSigner represents a GCP gRPC-based KMS client for a particular key URI.
 type GRPCSigner struct {
 	keyName   string
 	kms       *kms.KeyManagementClient
 	publicKey *kmspb.PublicKey
+	// mldsaPublicKeyHash is tr = SHAKE256(public key, 64) for external-mu ML-DSA keys, or nil for
+	// all other algorithms.
+	mldsaPublicKeyHash []byte
 }
 
 var _ tink.Signer = (*GRPCSigner)(nil)
@@ -65,17 +79,29 @@ func isSupported(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) boo
 		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
 		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87,
 		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S,
-		kmspb.CryptoKeyVersion_PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256:
+		kmspb.CryptoKeyVersion_PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU:
 
 		return true
 	}
 	return false
 }
 
-// useNISTPQCFormat helps enforce usage of NIST_PQC format for PQC keys, regardless of whether or
-// not they support PEM format.
+// useNISTPQCFormat reports whether the public key must be (re-)fetched in NIST_PQC format.
+//
+// This is needed in two cases:
+//   - The key does not support PEM at all (e.g. SLH-DSA), which surfaces as an error.
+//   - The algorithm is external-mu ML-DSA, where the raw NIST_PQC key bytes are required to
+//     compute the message representative (μ).
+//
+// All other algorithms, including regular ML-DSA, are fully served by the initial PEM response.
 func useNISTPQCFormat(response *kmspb.PublicKey, err error) bool {
 	if err != nil && strings.Contains(err.Error(), "Only NIST_PQC format is supported") {
+		return true
+	}
+	if err == nil && isMLDSAExternalMuAlgorithm(response.GetAlgorithm()) {
 		return true
 	}
 	return false
@@ -163,10 +189,18 @@ func NewGRPCSigner(ctx context.Context, keyName string, kms *kms.KeyManagementCl
 	if !isSupported(publicKey.GetAlgorithm()) {
 		return nil, fmt.Errorf("the given algorithm %q is not supported", publicKey.GetAlgorithm())
 	}
+	var mldsaPublicKeyHash []byte
+	if isMLDSAExternalMuAlgorithm(publicKey.GetAlgorithm()) {
+		mldsaPublicKeyHash, err = computeMLDSAPublicKeyHash(publicKey)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &GRPCSigner{
-		keyName:   keyName,
-		kms:       kms,
-		publicKey: publicKey,
+		keyName:            keyName,
+		kms:                kms,
+		publicKey:          publicKey,
+		mldsaPublicKeyHash: mldsaPublicKeyHash,
 	}, nil
 }
 
@@ -195,10 +229,79 @@ func digestHashForAlgorithm(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlg
 	}
 }
 
+// isMLDSAExternalMuAlgorithm returns whether the algorithm expects an externally computed ML-DSA
+// message representative (μ) rather than a plain digest of the data.
+func isMLDSAExternalMuAlgorithm(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) bool {
+	switch algorithm {
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU:
+
+		return true
+	}
+	return false
+}
+
+// getMLDSAPublicKeySize returns the encoded public key size for an external-mu ML-DSA algorithm.
+func getMLDSAPublicKeySize(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) (int, error) {
+	switch algorithm {
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU:
+		return mldsa44PublicKeyBytes, nil
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU:
+		return mldsa65PublicKeyBytes, nil
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU:
+		return mldsa87PublicKeyBytes, nil
+	default:
+		return 0, fmt.Errorf("the given algorithm %q does not support an external ML-DSA mu", algorithm)
+	}
+}
+
+// computeMLDSAPublicKeyHash computes the SHAKE-256 hash of the public key for an external-mu ML-DSA key.
+//
+// Per FIPS-204:
+//
+//	tr = SHAKE256(public key, 64)
+func computeMLDSAPublicKeyHash(publicKey *kmspb.PublicKey) ([]byte, error) {
+	publicKeyBytes := publicKey.GetPublicKey().GetData()
+	expectedSize, err := getMLDSAPublicKeySize(publicKey.GetAlgorithm())
+	if err != nil {
+		return nil, err
+	}
+	if len(publicKeyBytes) != expectedSize {
+		return nil, fmt.Errorf("incorrect public key size for %q: got %d bytes, want %d", publicKey.GetAlgorithm(), len(publicKeyBytes), expectedSize)
+	}
+	return sha3.SumSHAKE256(publicKeyBytes, mldsaPublicKeyHashBytes), nil
+}
+
+// computeMLDSAExternalMu computes the ML-DSA message representative (μ) for the empty context used
+// by Cloud KMS.
+//
+// Per FIPS-204 (algorithm 7 in section 6.2):
+//
+//	μ = SHAKE256(tr || 0x00 || 0x00 || data, 64)
+//
+// Where tr is the SHAKE-256 hash of the encoded public key. KMS signs with an empty context,
+// so μ is computed with an empty context as well.
+func computeMLDSAExternalMu(publicKeyHash, data []byte) []byte {
+	h := sha3.NewSHAKE256()
+	h.Write(publicKeyHash)
+	h.Write([]byte{0x00, 0x00}) // Pure-mode domain separator and empty-context length.
+	h.Write(data)
+	mu := make([]byte, mldsaMuBytes)
+	h.Read(mu)
+	return mu
+}
+
 // calculateDigest returns the digest of the given data and the CRC32C checksum of the digest.
 // It returns an error if the digest cannot be computed.
-func calculateDigest(data []byte, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) (*kmspb.Digest, int64, error) {
-	selectedHash, err := digestHashForAlgorithm(algorithm)
+func (s *GRPCSigner) calculateDigest(data []byte) (*kmspb.Digest, int64, error) {
+	if isMLDSAExternalMuAlgorithm(s.publicKey.GetAlgorithm()) {
+		mu := computeMLDSAExternalMu(s.mldsaPublicKeyHash, data)
+		digest := &kmspb.Digest{Digest: &kmspb.Digest_ExternalMu{ExternalMu: mu}}
+		return digest, computeChecksum(mu), nil
+	}
+
+	selectedHash, err := digestHashForAlgorithm(s.publicKey.GetAlgorithm())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -225,10 +328,10 @@ func calculateDigest(data []byte, algorithm kmspb.CryptoKeyVersion_CryptoKeyVers
 	return digest, checksum, nil
 }
 
-// buildAsymmetricSignRequest constructs an AsymmetricSignRequest for the given data and key parameters.
-func buildAsymmetricSignRequest(keyName string, data []byte, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, protectionLevel kmspb.ProtectionLevel) (*kmspb.AsymmetricSignRequest, error) {
-	request := &kmspb.AsymmetricSignRequest{Name: keyName}
-	if requiresDataForSign(algorithm, protectionLevel) {
+// buildAsymmetricSignRequest constructs an AsymmetricSignRequest for the given data.
+func (s *GRPCSigner) buildAsymmetricSignRequest(data []byte) (*kmspb.AsymmetricSignRequest, error) {
+	request := &kmspb.AsymmetricSignRequest{Name: s.keyName}
+	if requiresDataForSign(s.publicKey.GetAlgorithm(), s.publicKey.GetProtectionLevel()) {
 		if len(data) > kmsMaxSignDataSize {
 			return nil, fmt.Errorf("the input data (%d bytes) is larger than the allowed limit (%d bytes)", len(data), kmsMaxSignDataSize)
 		}
@@ -238,7 +341,7 @@ func buildAsymmetricSignRequest(keyName string, data []byte, algorithm kmspb.Cry
 		return request, nil
 	}
 
-	digest, digestCrc32C, err := calculateDigest(data, algorithm)
+	digest, digestCrc32C, err := s.calculateDigest(data)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +358,7 @@ func (s *GRPCSigner) Sign(data []byte) ([]byte, error) {
 
 // SignWithContext calls KMS to sign the input data and returns the signature.
 func (s *GRPCSigner) SignWithContext(ctx context.Context, data []byte) ([]byte, error) {
-	request, err := buildAsymmetricSignRequest(s.keyName, data, s.publicKey.GetAlgorithm(), s.publicKey.GetProtectionLevel())
+	request, err := s.buildAsymmetricSignRequest(data)
 	if err != nil {
 		return nil, err
 	}
