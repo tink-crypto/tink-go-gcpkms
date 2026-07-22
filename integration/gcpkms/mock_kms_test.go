@@ -117,6 +117,21 @@ func (s *mockKMS) externalMuPublicKey(req *kmspb.GetPublicKeyRequest, response *
 	return response
 }
 
+// classicalVerifierPublicKey populates response with the real, parseable public key material for a
+// verifier test key, keyed by name. It returns false if the key name is not a verifier classical key.
+func (s *mockKMS) classicalVerifierPublicKey(response *kmspb.PublicKey, keyName string) (*kmspb.PublicKey, bool) {
+	testKey, ok := verifierClassicalKeys[keyName]
+	if !ok {
+		return response, false
+	}
+	response.Algorithm = testKey.algorithm
+	response.PublicKey = &kmspb.ChecksummedData{
+		Data:           testKey.pemPublicKey,
+		Crc32CChecksum: &wrappb.Int64Value{Value: computeChecksum(testKey.pemPublicKey)},
+	}
+	return response, true
+}
+
 func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
 	s.getPublicKeyFormatRequests = append(s.getPublicKeyFormatRequests, req.GetPublicKeyFormat())
 	response := &kmspb.PublicKey{}
@@ -129,6 +144,10 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 	response.PublicKey = &kmspb.ChecksummedData{
 		Data:           publicKeyData,
 		Crc32CChecksum: &wrappb.Int64Value{Value: publicKeyCrc32c},
+	}
+
+	if resp, ok := s.classicalVerifierPublicKey(response, req.GetName()); ok {
+		return resp, nil
 	}
 
 	switch req.GetName() {
@@ -192,6 +211,19 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 			return nil, err
 		}
 		response.PublicKey.Crc32CChecksum.Value = 1
+		return response, nil
+	case verifyKeyNameErrorGetPublicKey:
+		return nil, status.Error(codes.Internal, "Internal error")
+	case verifyKeyNameErrorUnsupportedAlgorithm:
+		response.Algorithm = kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_2048_SHA256
+		return response, nil
+	case verifyKeyNameErrorChecksumMismatch:
+		response, _ = s.classicalVerifierPublicKey(response, verifyKeyNameECP256)
+		response.PublicKey.Crc32CChecksum.Value = 1
+		return response, nil
+	case verifyKeyNameErrorWrongKeyName:
+		response, _ = s.classicalVerifierPublicKey(response, verifyKeyNameECP256)
+		response.Name = "wrong key name"
 		return response, nil
 	default:
 		return nil, status.Error(codes.NotFound, "Key not found")
