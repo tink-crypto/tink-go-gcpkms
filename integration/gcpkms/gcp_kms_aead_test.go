@@ -211,6 +211,88 @@ func TestEncrypt_Success(t *testing.T) {
 	}
 }
 
+func TestDecrypt_FailsWhenCiphertextUnverified(t *testing.T) {
+	plaintext := []byte("plaintext")
+	plaintextCrc32c := int64(crc32.Checksum(plaintext, crc32.MakeTable(crc32.Castagnoli)))
+	testcases := []struct {
+		name            string
+		decryptResponse *cloudkms.DecryptResponse
+	}{
+		{
+			name: "verified_ciphertext_crc32c is false",
+			decryptResponse: &cloudkms.DecryptResponse{
+				Plaintext:                                 base64.StdEncoding.EncodeToString(plaintext),
+				PlaintextCrc32c:                           plaintextCrc32c,
+				VerifiedCiphertextCrc32c:                  false,
+				VerifiedAdditionalAuthenticatedDataCrc32c: true,
+			},
+		},
+		{
+			name: "verified_ciphertext_crc32c missing",
+			decryptResponse: &cloudkms.DecryptResponse{
+				Plaintext:                                 base64.StdEncoding.EncodeToString(plaintext),
+				PlaintextCrc32c:                           plaintextCrc32c,
+				VerifiedAdditionalAuthenticatedDataCrc32c: true,
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			ts, svc := initializeServerWithResponse(ctx, t, tc.decryptResponse)
+			defer ts.Close()
+
+			aead := newGCPAEAD("key name", svc)
+			_, err := aead.Decrypt([]byte("ciphertext"), []byte("additional data"))
+			if err == nil {
+				t.Errorf("a.Decrypt err = nil, want error")
+			}
+		})
+	}
+}
+
+func TestDecrypt_FailsWhenAdditionalAuthenticatedDataUnverified(t *testing.T) {
+	plaintext := []byte("plaintext")
+	plaintextCrc32c := int64(crc32.Checksum(plaintext, crc32.MakeTable(crc32.Castagnoli)))
+	testcases := []struct {
+		name            string
+		decryptResponse *cloudkms.DecryptResponse
+	}{
+		{
+			name: "verified_additional_authenticated_data_crc32c is false",
+			decryptResponse: &cloudkms.DecryptResponse{
+				Plaintext:                                 base64.StdEncoding.EncodeToString(plaintext),
+				PlaintextCrc32c:                           plaintextCrc32c,
+				VerifiedCiphertextCrc32c:                  true,
+				VerifiedAdditionalAuthenticatedDataCrc32c: false,
+			},
+		},
+		{
+			name: "verified_additional_authenticated_data_crc32c missing",
+			decryptResponse: &cloudkms.DecryptResponse{
+				Plaintext:                base64.StdEncoding.EncodeToString(plaintext),
+				PlaintextCrc32c:          plaintextCrc32c,
+				VerifiedCiphertextCrc32c: true,
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			ts, svc := initializeServerWithResponse(ctx, t, tc.decryptResponse)
+			defer ts.Close()
+
+			aead := newGCPAEAD("key name", svc)
+			_, err := aead.Decrypt([]byte("ciphertext"), []byte("additional data"))
+			if err == nil {
+				t.Errorf("a.Decrypt err = nil, want error")
+			}
+		})
+	}
+}
+
 func TestDecrypt_FailsWithInvalidPlaintextCrc32c(t *testing.T) {
 	testcases := []struct {
 		name            string
@@ -219,14 +301,18 @@ func TestDecrypt_FailsWithInvalidPlaintextCrc32c(t *testing.T) {
 		{
 			name: "plaintext_crc32c does not match plaintext",
 			decryptResponse: &cloudkms.DecryptResponse{
-				Plaintext:       base64.StdEncoding.EncodeToString([]byte("plaintext")),
-				PlaintextCrc32c: int64(1),
+				Plaintext:                                 base64.StdEncoding.EncodeToString([]byte("plaintext")),
+				PlaintextCrc32c:                           int64(1),
+				VerifiedCiphertextCrc32c:                  true,
+				VerifiedAdditionalAuthenticatedDataCrc32c: true,
 			},
 		},
 		{
 			name: "plaintext_crc32c missing",
 			decryptResponse: &cloudkms.DecryptResponse{
-				Plaintext: base64.StdEncoding.EncodeToString([]byte("plaintext")),
+				Plaintext:                                 base64.StdEncoding.EncodeToString([]byte("plaintext")),
+				VerifiedCiphertextCrc32c:                  true,
+				VerifiedAdditionalAuthenticatedDataCrc32c: true,
 			},
 		},
 	}
@@ -254,8 +340,10 @@ func TestDecrypt_Success(t *testing.T) {
 	ctx := context.Background()
 	ts, svc := initializeServerWithResponse(ctx, t,
 		&cloudkms.DecryptResponse{
-			Plaintext:       base64.StdEncoding.EncodeToString(plaintext),
-			PlaintextCrc32c: plaintextCrc32c,
+			Plaintext:                                 base64.StdEncoding.EncodeToString(plaintext),
+			PlaintextCrc32c:                           plaintextCrc32c,
+			VerifiedCiphertextCrc32c:                  true,
+			VerifiedAdditionalAuthenticatedDataCrc32c: true,
 		})
 	defer ts.Close()
 
