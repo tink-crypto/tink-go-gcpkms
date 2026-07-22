@@ -55,8 +55,6 @@ var _ tink.Signer = (*GRPCSigner)(nil)
 // kmsMaxSignDataSize represents the maximum size of the data that can be signed.
 const kmsMaxSignDataSize = 64 * 1024
 
-var errChecksumMismatch = errors.New("checksum verification failed")
-
 // isSupported reports whether the given algorithm is supported for signing.
 func isSupported(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) bool {
 	switch algorithm {
@@ -129,51 +127,6 @@ func requiresDataForSign(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgori
 	return false
 }
 
-// tryGetPublicKey attempts to get the public key for the given key name.
-// It requires that the request explicitly specify the key format.
-func tryGetPublicKey(ctx context.Context, kms *kms.KeyManagementClient, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
-	if req.GetPublicKeyFormat() == kmspb.PublicKey_PUBLIC_KEY_FORMAT_UNSPECIFIED {
-		return nil, errors.New("public key format is required")
-	}
-	response, err := kms.GetPublicKey(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("GCP KMS GetPublicKey failed: %w", err)
-	}
-	checksumReceived := response.GetPublicKey().GetCrc32CChecksum().GetValue()
-	checksumCalculated := computeChecksum(response.GetPublicKey().GetData())
-	if checksumReceived != checksumCalculated {
-		return nil, fmt.Errorf("%w: received %d, calculated %d", errChecksumMismatch, checksumReceived, checksumCalculated)
-	}
-	return response, nil
-}
-
-// getPublicKey gets the public key for the given key name.
-func getPublicKey(ctx context.Context, keyName string, kms *kms.KeyManagementClient) (*kmspb.PublicKey, error) {
-	req := &kmspb.GetPublicKeyRequest{Name: keyName, PublicKeyFormat: kmspb.PublicKey_PEM}
-	var response *kmspb.PublicKey
-	var err error
-	// The goal is to retry a limited number of times on checksum validation errors in case the error
-	// is transient, following the guidelines in https://cloud.google.com/kms/docs/data-integrity-guidelines
-	for i := 0; i < 3; i++ {
-		response, err = tryGetPublicKey(ctx, kms, req)
-		if req.PublicKeyFormat != kmspb.PublicKey_NIST_PQC && useNISTPQCFormat(response, err) {
-			req.PublicKeyFormat = kmspb.PublicKey_NIST_PQC
-			response, err = tryGetPublicKey(ctx, kms, req)
-		}
-		if err != nil && errors.Is(err, errChecksumMismatch) {
-			continue
-		}
-		break
-	}
-	if err != nil {
-		return nil, err
-	}
-	if response.GetName() != keyName {
-		return nil, fmt.Errorf("the response key name %q does not match the requested key name %q", response.GetName(), keyName)
-	}
-	return response, nil
-}
-
 // NewGRPCSigner returns a new GCP KMS client that can be used for signing.
 func NewGRPCSigner(ctx context.Context, keyName string, kms *kms.KeyManagementClient) (*GRPCSigner, error) {
 	if err := validateKMSKeyName(keyName); err != nil {
@@ -182,7 +135,7 @@ func NewGRPCSigner(ctx context.Context, keyName string, kms *kms.KeyManagementCl
 	if kms == nil {
 		return nil, errors.New("kms client cannot be nil")
 	}
-	publicKey, err := getPublicKey(ctx, keyName, kms)
+	publicKey, err := getPublicKey(ctx, keyName, kms, useNISTPQCFormat)
 	if err != nil {
 		return nil, err
 	}
