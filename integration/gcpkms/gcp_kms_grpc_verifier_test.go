@@ -57,6 +57,9 @@ const (
 	verifyKeyNameMLDSA65                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/16"
 	verifyKeyNameMLDSA87                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/17"
 	verifyKeyNameSLHDSA                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/18"
+	verifyKeyNameMLDSA44ExternalMu         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/19"
+	verifyKeyNameMLDSA65ExternalMu         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/20"
+	verifyKeyNameMLDSA87ExternalMu         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/21"
 )
 
 // verifyMessage is the message signed and verified across the verifier tests.
@@ -116,6 +119,9 @@ func getVerifierPQCKeys(t *testing.T) map[string]pqcTestKey {
 			verifyKeyNameMLDSA65: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65, mldsaParams(t, tinkmldsa.MLDSA65), false),
 			verifyKeyNameMLDSA87: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87, mldsaParams(t, tinkmldsa.MLDSA87), false),
 			verifyKeyNameSLHDSA:  newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S, slhdsaParams(t), true),
+			verifyKeyNameMLDSA44ExternalMu: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU, mldsaParams(t, tinkmldsa.MLDSA44), false),
+			verifyKeyNameMLDSA65ExternalMu: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU, mldsaParams(t, tinkmldsa.MLDSA65), false),
+			verifyKeyNameMLDSA87ExternalMu: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU, mldsaParams(t, tinkmldsa.MLDSA87), false),
 		}
 	})
 	return verifierPQCKeys

@@ -131,6 +131,9 @@ func isPQCAlgorithm(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) 
 	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44,
 		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
 		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU,
 		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
 
 		return true
@@ -140,13 +143,20 @@ func isPQCAlgorithm(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) 
 
 // pqcPublicKey builds the Tink signature public key for a post-quantum algorithm from the raw
 // NIST_PQC public key bytes returned by GCP KMS. The algorithm switch also acts as the support check.
+//
+// External-mu ML-DSA keys map to the same instance as their base algorithm: an external-mu signature
+// is a standard ML-DSA signature (the KMS signer and the pure verifier compute the message
+// representative μ identically), so it is verified through the same pure ML-DSA path.
 func pqcPublicKey(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, rawPublicKey []byte) (key.Key, error) {
 	switch algorithm {
-	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44:
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU:
 		return mldsaPublicKey(rawPublicKey, tinkmldsa.MLDSA44)
-	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65:
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU:
 		return mldsaPublicKey(rawPublicKey, tinkmldsa.MLDSA65)
-	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87:
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU:
 		return mldsaPublicKey(rawPublicKey, tinkmldsa.MLDSA87)
 	case kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
 		return slhdsaPublicKey(rawPublicKey)
