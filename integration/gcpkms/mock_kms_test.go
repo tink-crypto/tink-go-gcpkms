@@ -132,6 +132,29 @@ func (s *mockKMS) classicalVerifierPublicKey(response *kmspb.PublicKey, keyName 
 	return response, true
 }
 
+// pqcVerifierPublicKey populates response with the raw public key material for a post-quantum
+// verifier test key, keyed by name. SLH-DSA keys (nistPQCOnly) reject the initial PEM request; for
+// ML-DSA keys, because we do not yet have OSS PEM parsing logic, we leave the default PEM
+// response unchanged and supply the real public key bytes only in the NIST_PQC response.
+// It returns false if the key name is not a verifier PQC key.
+func (s *mockKMS) pqcVerifierPublicKey(req *kmspb.GetPublicKeyRequest, response *kmspb.PublicKey) (*kmspb.PublicKey, bool, error) {
+	testKey, ok := verifierPQCKeys[req.GetName()]
+	if !ok {
+		return response, false, nil
+	}
+	if testKey.nistPQCOnly && req.GetPublicKeyFormat() != kmspb.PublicKey_NIST_PQC {
+		return nil, true, status.Error(codes.InvalidArgument, "Only NIST_PQC format is supported for PQC algorithms.")
+	}
+	response.Algorithm = testKey.algorithm
+	if req.GetPublicKeyFormat() == kmspb.PublicKey_NIST_PQC {
+		response.PublicKey = &kmspb.ChecksummedData{
+			Data:           testKey.rawPublicKey,
+			Crc32CChecksum: &wrappb.Int64Value{Value: computeChecksum(testKey.rawPublicKey)},
+		}
+	}
+	return response, true, nil
+}
+
 func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
 	s.getPublicKeyFormatRequests = append(s.getPublicKeyFormatRequests, req.GetPublicKeyFormat())
 	response := &kmspb.PublicKey{}
@@ -148,6 +171,9 @@ func (s *mockKMS) GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyReque
 
 	if resp, ok := s.classicalVerifierPublicKey(response, req.GetName()); ok {
 		return resp, nil
+	}
+	if resp, ok, err := s.pqcVerifierPublicKey(req, response); ok {
+		return resp, err
 	}
 
 	switch req.GetName() {

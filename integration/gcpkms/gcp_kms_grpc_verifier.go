@@ -22,14 +22,17 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strings"
 
 	"cloud.google.com/go/kms/apiv1"
 	"github.com/tink-crypto/tink-go/v2/key"
 	"github.com/tink-crypto/tink-go/v2/keyset"
 	tinkecdsa "github.com/tink-crypto/tink-go/v2/signature/ecdsa"
+	tinkmldsa "github.com/tink-crypto/tink-go/v2/signature/mldsa"
 	tinkrsapkcs1 "github.com/tink-crypto/tink-go/v2/signature/rsassapkcs1"
 	tinkrsapss "github.com/tink-crypto/tink-go/v2/signature/rsassapss"
 	"github.com/tink-crypto/tink-go/v2/signature"
+	tinkslhdsa "github.com/tink-crypto/tink-go/v2/signature/slhdsa"
 	"github.com/tink-crypto/tink-go/v2/tink"
 
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"  // injected by Copybara
@@ -93,21 +96,85 @@ func (v *GRPCVerifier) Verify(signatureBytes, data []byte) error {
 	return v.verifier.Verify(signatureBytes, data)
 }
 
-// verifierNeedsNISTPQCFormat reports whether the verifier must (re-)fetch the public key in NIST_PQC
-// format. This currently supports classical algorithms, which are fully served by the PEM response, so
-// this is always false.
-func verifierNeedsNISTPQCFormat(*kmspb.PublicKey, error) bool {
-	return false
+// verifierNeedsNISTPQCFormat reports whether the verifier must (re-)fetch the public key in NIST_PQC format.
+//
+// Classical algorithms are fully served by the PEM response. Post-quantum algorithms are
+// served as either raw NIST_PQC bytes or PEM format.
+// But the verifier processes raw bytes, so PQC keys are refetched in NIST_PQC.
+func verifierNeedsNISTPQCFormat(response *kmspb.PublicKey, err error) bool {
+	if err != nil {
+		return strings.Contains(err.Error(), "Only NIST_PQC format is supported")
+	}
+	return isPQCAlgorithm(response.GetAlgorithm())
 }
 
 // internalVerifier builds a local [tink.Verifier] for the given KMS algorithm and public key
 // material. The algorithm mapping also acts as the support check: unsupported algorithms fail here.
 func internalVerifier(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, publicKeyData []byte) (tink.Verifier, error) {
-	publicKey, err := classicalPublicKey(algorithm, publicKeyData)
+	var publicKey key.Key
+	var err error
+	if isPQCAlgorithm(algorithm) {
+		publicKey, err = pqcPublicKey(algorithm, publicKeyData)
+	} else {
+		publicKey, err = classicalPublicKey(algorithm, publicKeyData)
+	}
 	if err != nil {
 		return nil, err
 	}
 	return verifierFromKey(publicKey)
+}
+
+// isPQCAlgorithm reports whether the algorithm's public key is served as raw NIST_PQC bytes and
+// verified through the post-quantum path.
+func isPQCAlgorithm(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) bool {
+	switch algorithm {
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
+		kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87,
+		kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
+
+		return true
+	}
+	return false
+}
+
+// pqcPublicKey builds the Tink signature public key for a post-quantum algorithm from the raw
+// NIST_PQC public key bytes returned by GCP KMS. The algorithm switch also acts as the support check.
+func pqcPublicKey(algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, rawPublicKey []byte) (key.Key, error) {
+	switch algorithm {
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44:
+		return mldsaPublicKey(rawPublicKey, tinkmldsa.MLDSA44)
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65:
+		return mldsaPublicKey(rawPublicKey, tinkmldsa.MLDSA65)
+	case kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87:
+		return mldsaPublicKey(rawPublicKey, tinkmldsa.MLDSA87)
+	case kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:
+		return slhdsaPublicKey(rawPublicKey)
+	default:
+		return nil, fmt.Errorf("the given algorithm %q is not supported", algorithm)
+	}
+}
+
+// mldsaPublicKey builds a Tink ML-DSA public key from raw NIST_PQC material. KMS produces raw ML-DSA
+// signatures with no Tink output prefix, hence the NO_PREFIX variant.
+func mldsaPublicKey(rawPublicKey []byte, instance tinkmldsa.Instance) (key.Key, error) {
+	params, err := tinkmldsa.NewParameters(instance, tinkmldsa.VariantNoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	// NewPublicKey validates the key length for the instance, catching a key/algorithm mismatch.
+	return tinkmldsa.NewPublicKey(rawPublicKey, 0, params)
+}
+
+// slhdsaPublicKey builds a Tink SLH-DSA-SHA2-128s public key from raw NIST_PQC material. KMS produces
+// raw SLH-DSA signatures with no Tink output prefix, hence the NO_PREFIX variant.
+func slhdsaPublicKey(rawPublicKey []byte) (key.Key, error) {
+	params, err := tinkslhdsa.NewParameters(tinkslhdsa.SHA2, 64, tinkslhdsa.SmallSignature, tinkslhdsa.VariantNoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	// NewPublicKey validates the key length, catching a key/algorithm mismatch.
+	return tinkslhdsa.NewPublicKey(rawPublicKey, 0, params)
 }
 
 // classicalPublicKey builds the Tink signature public key for a classical (ECDSA or RSA) algorithm
@@ -164,16 +231,16 @@ func ecdsaPublicKey(pemPublicKey []byte, curve tinkecdsa.CurveType, hash tinkecd
 	if !ok {
 		return nil, fmt.Errorf("the public key is not an ECDSA key: got %T", parsedKey)
 	}
-	ecdhKey, err := pub.Bytes()
+	pubBytes, err := pub.Bytes()
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert the ECDSA public key: %w", err)
+		return nil, fmt.Errorf("failed to serialize the ECDSA public key: %w", err)
 	}
 	params, err := tinkecdsa.NewParameters(curve, hash, tinkecdsa.DER, tinkecdsa.VariantNoPrefix)
 	if err != nil {
 		return nil, err
 	}
 	// NewPublicKey validates the point against the curve, catching a key/algorithm mismatch.
-	return tinkecdsa.NewPublicKey(ecdhKey, 0, params)
+	return tinkecdsa.NewPublicKey(pubBytes, 0, params)
 }
 
 // rsaPKCS1PublicKey builds a Tink RSA SSA PKCS1 public key from PEM material.

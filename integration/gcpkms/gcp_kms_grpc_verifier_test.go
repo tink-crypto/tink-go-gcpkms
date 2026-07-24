@@ -28,6 +28,11 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/tink-crypto/tink-go/v2/key"
+	"github.com/tink-crypto/tink-go/v2/keyset"
+	tinkmldsa "github.com/tink-crypto/tink-go/v2/signature/mldsa"
+	"github.com/tink-crypto/tink-go/v2/signature"
+	tinkslhdsa "github.com/tink-crypto/tink-go/v2/signature/slhdsa"
 
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"  // injected by Copybara
 	// Placeholder for internal proto import.
@@ -48,6 +53,10 @@ const (
 	verifyKeyNameErrorChecksumMismatch     = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/12"
 	verifyKeyNameErrorWrongKeyName         = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/13"
 	verifyKeyNameErrorUnsupportedAlgorithm = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/14"
+	verifyKeyNameMLDSA44                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/15"
+	verifyKeyNameMLDSA65                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/16"
+	verifyKeyNameMLDSA87                   = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/17"
+	verifyKeyNameSLHDSA                    = "projects/P1/locations/L1/keyRings/R1/cryptoKeys/K2/cryptoKeyVersions/18"
 )
 
 // verifyMessage is the message signed and verified across the verifier tests.
@@ -61,9 +70,19 @@ type classicalTestKey struct {
 	sign         func(t *testing.T, message []byte) []byte
 }
 
+type pqcTestKey struct {
+	algorithm    kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm
+	rawPublicKey []byte
+	nistPQCOnly  bool
+	sign         func(t *testing.T, message []byte) []byte
+}
+
 var (
 	verifierClassicalKeys     map[string]classicalTestKey
 	verifierClassicalKeysOnce sync.Once
+
+	verifierPQCKeys     map[string]pqcTestKey
+	verifierPQCKeysOnce sync.Once
 )
 
 func getVerifierClassicalKeys(t *testing.T) map[string]classicalTestKey {
@@ -87,6 +106,91 @@ func getVerifierClassicalKeys(t *testing.T) map[string]classicalTestKey {
 		}
 	})
 	return verifierClassicalKeys
+}
+
+func getVerifierPQCKeys(t *testing.T) map[string]pqcTestKey {
+	t.Helper()
+	verifierPQCKeysOnce.Do(func() {
+		verifierPQCKeys = map[string]pqcTestKey{
+			verifyKeyNameMLDSA44: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44, mldsaParams(t, tinkmldsa.MLDSA44), false),
+			verifyKeyNameMLDSA65: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65, mldsaParams(t, tinkmldsa.MLDSA65), false),
+			verifyKeyNameMLDSA87: newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87, mldsaParams(t, tinkmldsa.MLDSA87), false),
+			verifyKeyNameSLHDSA:  newPQCTestKey(t, kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S, slhdsaParams(t), true),
+		}
+	})
+	return verifierPQCKeys
+}
+
+// mldsaParams builds NO_PREFIX ML-DSA parameters for the given instance or signals test failure.
+func mldsaParams(t *testing.T, instance tinkmldsa.Instance) key.Parameters {
+	t.Helper()
+	params, err := tinkmldsa.NewParameters(instance, tinkmldsa.VariantNoPrefix)
+	if err != nil {
+		t.Fatalf("tinkmldsa.NewParameters(%v, VariantNoPrefix) err = %v, want nil", instance, err)
+	}
+	return params
+}
+
+// slhdsaParams builds NO_PREFIX SLH-DSA-SHA2-128s parameters or signals test failure.
+func slhdsaParams(t *testing.T) key.Parameters {
+	t.Helper()
+	params, err := tinkslhdsa.NewParameters(tinkslhdsa.SHA2, 64, tinkslhdsa.SmallSignature, tinkslhdsa.VariantNoPrefix)
+	if err != nil {
+		t.Fatalf("tinkslhdsa.NewParameters(SHA2, 64, SmallSignature, VariantNoPrefix) err = %v, want nil", err)
+	}
+	return params
+}
+
+// newPQCTestKey generates a real post-quantum key pair with Tink, returning the raw public key bytes
+// (as KMS serves them in NIST_PQC form) and a signer producing raw signatures over a message.
+func newPQCTestKey(t *testing.T, algorithm kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, params key.Parameters, nistPQCOnly bool) pqcTestKey {
+	t.Helper()
+	manager := keyset.NewManager()
+	keyID, err := manager.AddNewKeyFromParameters(params)
+	if err != nil {
+		t.Fatalf("manager.AddNewKeyFromParameters(%v) err = %v, want nil", params, err)
+	}
+	if err := manager.SetPrimary(keyID); err != nil {
+		t.Fatalf("manager.SetPrimary(%v) err = %v, want nil", keyID, err)
+	}
+	handle, err := manager.Handle()
+	if err != nil {
+		t.Fatalf("manager.Handle() err = %v, want nil", err)
+	}
+	signer, err := signature.NewSigner(handle)
+	if err != nil {
+		t.Fatalf("signature.NewSigner(handle) err = %v, want nil", err)
+	}
+	publicHandle, err := handle.Public()
+	if err != nil {
+		t.Fatalf("handle.Public() err = %v, want nil", err)
+	}
+	entry, err := publicHandle.Primary()
+	if err != nil {
+		t.Fatalf("publicHandle.Primary() err = %v, want nil", err)
+	}
+	var rawPublicKey []byte
+	switch publicKey := entry.Key().(type) {
+	case *tinkmldsa.PublicKey:
+		rawPublicKey = publicKey.KeyBytes()
+	case *tinkslhdsa.PublicKey:
+		rawPublicKey = publicKey.KeyBytes()
+	default:
+		t.Fatalf("unexpected public key type %T", publicKey)
+	}
+	return pqcTestKey{
+		algorithm:    algorithm,
+		rawPublicKey: rawPublicKey,
+		nistPQCOnly:  nistPQCOnly,
+		sign: func(t *testing.T, message []byte) []byte {
+			t.Helper()
+			signature, err := signer.Sign(message)
+			if err != nil {
+				t.Fatalf("signer.Sign() err = %v, want nil", err)
+			}
+			return signature
+		},
+	}
 }
 
 // generateRSA generates an RSA private key of the given size or signals test failure.
@@ -190,11 +294,47 @@ func TestGRPCVerifier_Success(t *testing.T) {
 				t.Errorf("GetPublicKey requests = %v, want %v", mockServer.getPublicKeyFormatRequests, wantFormats)
 			}
 
-			signature := testKey.sign(t, verifyMessage)
-			if err := verifier.Verify(signature, verifyMessage); err != nil {
-				t.Errorf("verifier.Verify() err = %v, want nil", err)
-			}
+			assertVerifyRoundTrip(t, verifier, testKey.sign)
 		})
+	}
+}
+
+func TestGRPCVerifier_PQCSuccess(t *testing.T) {
+	for keyName, testKey := range getVerifierPQCKeys(t) {
+		t.Run(testKey.algorithm.String(), func(t *testing.T) {
+			mockServer := &mockKMS{}
+			gcpKMSClient := setupMockKMSClient(t.Context(), t, mockServer)
+
+			verifier, err := NewGRPCVerifier(t.Context(), keyName, gcpKMSClient)
+			if err != nil {
+				t.Fatalf("NewGRPCVerifier(%q) err = %v, want nil", keyName, err)
+			}
+			// Post-quantum keys are served as raw bytes: PEM is attempted first, then NIST_PQC is fetched.
+			wantFormats := []kmspb.PublicKey_PublicKeyFormat{kmspb.PublicKey_PEM, kmspb.PublicKey_NIST_PQC}
+			if !cmp.Equal(mockServer.getPublicKeyFormatRequests, wantFormats) {
+				t.Errorf("GetPublicKey requests = %v, want %v", mockServer.getPublicKeyFormatRequests, wantFormats)
+			}
+
+			assertVerifyRoundTrip(t, verifier, testKey.sign)
+		})
+	}
+}
+
+// assertVerifyRoundTrip checks that verifier accepts a valid signature over verifyMessage and rejects
+// both a wrong message and a corrupted signature.
+func assertVerifyRoundTrip(t *testing.T, verifier *GRPCVerifier, sign func(t *testing.T, message []byte) []byte) {
+	t.Helper()
+	signature := sign(t, verifyMessage)
+	if err := verifier.Verify(signature, verifyMessage); err != nil {
+		t.Errorf("verifier.Verify() err = %v, want nil", err)
+	}
+	if err := verifier.Verify(signature, []byte("wrong data")); err == nil {
+		t.Errorf("verifier.Verify(signature, wrongData) err = nil, want error")
+	}
+	corrupted := bytes.Clone(signature)
+	corrupted[len(corrupted)-1] ^= 0xFF
+	if err := verifier.Verify(corrupted, verifyMessage); err == nil {
+		t.Errorf("verifier.Verify(corruptedSignature, data) err = nil, want error")
 	}
 }
 
@@ -205,21 +345,42 @@ func TestGRPCVerifier_FromPublicKeySuccess(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewGRPCVerifierFromPublicKey(%v) err = %v, want nil", testKey.algorithm, err)
 			}
-
-			signature := testKey.sign(t, verifyMessage)
-			if err := verifier.Verify(signature, verifyMessage); err != nil {
-				t.Errorf("verifier.Verify() err = %v, want nil", err)
-			}
-			// An invalid signature and a wrong message must both fail.
-			if err := verifier.Verify(signature, []byte("wrong data")); err == nil {
-				t.Errorf("verifier.Verify(signature, wrongData) err = nil, want error")
-			}
-			corrupted := bytes.Clone(signature)
-			corrupted[len(corrupted)-1] ^= 0xFF
-			if err := verifier.Verify(corrupted, verifyMessage); err == nil {
-				t.Errorf("verifier.Verify(corruptedSignature, data) err = nil, want error")
-			}
+			assertVerifyRoundTrip(t, verifier, testKey.sign)
 		})
+	}
+}
+
+func TestGRPCVerifier_FromPublicKeyPQCSuccess(t *testing.T) {
+	for _, testKey := range getVerifierPQCKeys(t) {
+		t.Run(testKey.algorithm.String(), func(t *testing.T) {
+			verifier, err := NewGRPCVerifierFromPublicKey(testKey.rawPublicKey, testKey.algorithm)
+			if err != nil {
+				t.Fatalf("NewGRPCVerifierFromPublicKey(%v) err = %v, want nil", testKey.algorithm, err)
+			}
+			assertVerifyRoundTrip(t, verifier, testKey.sign)
+		})
+	}
+}
+
+func TestGRPCVerifier_PQCMismatchedAlgorithmVerifyFails(t *testing.T) {
+	pqcKeys := getVerifierPQCKeys(t)
+	verifier44, err := NewGRPCVerifierFromPublicKey(pqcKeys[verifyKeyNameMLDSA44].rawPublicKey, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44)
+	if err != nil {
+		t.Fatalf("NewGRPCVerifierFromPublicKey(ML_DSA_44) err = %v, want nil", err)
+	}
+	verifier65, err := NewGRPCVerifierFromPublicKey(pqcKeys[verifyKeyNameMLDSA65].rawPublicKey, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65)
+	if err != nil {
+		t.Fatalf("NewGRPCVerifierFromPublicKey(ML_DSA_65) err = %v, want nil", err)
+	}
+
+	sig65 := pqcKeys[verifyKeyNameMLDSA65].sign(t, verifyMessage)
+	if err := verifier44.Verify(sig65, verifyMessage); err == nil {
+		t.Errorf("verifier44.Verify(sig65, verifyMessage) err = nil, want error")
+	}
+
+	sig44 := pqcKeys[verifyKeyNameMLDSA44].sign(t, verifyMessage)
+	if err := verifier65.Verify(sig44, verifyMessage); err == nil {
+		t.Errorf("verifier65.Verify(sig44, verifyMessage) err = nil, want error")
 	}
 }
 
@@ -233,6 +394,7 @@ func TestNewGRPCVerifier_NilKMSClientFails(t *testing.T) {
 func TestNewGRPCVerifier_Fails(t *testing.T) {
 	// Populate verifierClassicalKeys to facilitate lookup within mockKMS.
 	_ = getVerifierClassicalKeys(t)
+	_ = getVerifierPQCKeys(t)
 	testcases := []struct {
 		name    string
 		keyName string
@@ -287,9 +449,11 @@ func TestNewGRPCVerifier_Fails(t *testing.T) {
 }
 
 func TestNewGRPCVerifierFromPublicKey_Fails(t *testing.T) {
-	keys := getVerifierClassicalKeys(t)
-	ecKey := keys[verifyKeyNameECP256]
-	rsaKey := keys[verifyKeyNameRSAPKCS12048]
+	classicalKeys := getVerifierClassicalKeys(t)
+	pqcKeys := getVerifierPQCKeys(t)
+	ecKey := classicalKeys[verifyKeyNameECP256]
+	rsaKey := classicalKeys[verifyKeyNameRSAPKCS12048]
+	mldsaKey := pqcKeys[verifyKeyNameMLDSA44]
 	testcases := []struct {
 		name      string
 		publicKey []byte
@@ -331,6 +495,12 @@ func TestNewGRPCVerifierFromPublicKey_Fails(t *testing.T) {
 			publicKey: rsaKey.pemPublicKey,
 			algorithm: kmspb.CryptoKeyVersion_RSA_SIGN_PKCS1_4096_SHA256,
 			wantErr:   "modulus",
+		},
+		{
+			name:      "mldsa key length mismatch",
+			publicKey: mldsaKey.rawPublicKey,
+			algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
+			wantErr:   "public key length",
 		},
 	}
 
