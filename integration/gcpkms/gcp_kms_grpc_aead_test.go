@@ -17,8 +17,10 @@ package gcpkms
 import (
 	"bytes"
 	"context"
+	"errors"
 	"hash/crc32"
 	"net"
+	"sync"
 	"testing"
 
 	// Placeholder for internal grpc import.
@@ -62,8 +64,11 @@ func initializeGRPCClientWithResponse(t *testing.T, encryptResponse *kmspb.Encry
 
 	kmspb.RegisterKeyManagementServiceServer(s, mockService)
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		if err := s.Serve(lis); err != nil {
+		defer wg.Done()
+		if err := s.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			t.Logf("Mock gRPC server exited with error: %v", err)
 		}
 	}()
@@ -71,6 +76,7 @@ func initializeGRPCClientWithResponse(t *testing.T, encryptResponse *kmspb.Encry
 	t.Cleanup(func() {
 		s.Stop()
 		lis.Close()
+		wg.Wait()
 	})
 
 	dialer := func(ctx context.Context, address string) (net.Conn, error) {

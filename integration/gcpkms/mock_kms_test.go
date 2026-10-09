@@ -16,7 +16,9 @@ package gcpkms
 
 import (
 	"context"
+	"errors"
 	"net"
+	"sync"
 	"testing"
 
 	"cloud.google.com/go/kms/apiv1"
@@ -51,8 +53,11 @@ func setupMockKMSClient(ctx context.Context, t *testing.T, mockServer *mockKMS) 
 
 	kmspb.RegisterKeyManagementServiceServer(s, mockServer)
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		if err := s.Serve(lis); err != nil {
+		defer wg.Done()
+		if err := s.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			t.Logf("Mock gRPC server exited with error: %v", err)
 		}
 	}()
@@ -60,6 +65,7 @@ func setupMockKMSClient(ctx context.Context, t *testing.T, mockServer *mockKMS) 
 	t.Cleanup(func() {
 		s.Stop()
 		lis.Close()
+		wg.Wait()
 	})
 
 	dialer := func(ctx context.Context, address string) (net.Conn, error) {
