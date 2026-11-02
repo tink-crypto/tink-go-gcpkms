@@ -1,6 +1,6 @@
 module github.com/tink-crypto/tink-go-gcpkms/v2
 
-go 1.26.6
+go 1.26.10
 
 require (
 	cloud.google.com/go/kms v1.33.0
