@@ -64,7 +64,11 @@ func (a *grpcAEAD) EncryptWithContext(ctx context.Context, plaintext, associated
 	if !resp.VerifiedAdditionalAuthenticatedDataCrc32C {
 		return nil, fmt.Errorf("KMS request for %q is missing the checksum field additional_authenticated_data_crc32c, and other information may be missing from the response. Please retry a limited number of times in case the error is transient", a.keyURI)
 	}
-	if !strings.HasPrefix(resp.GetName(), a.keyURI) {
+	if keyVersionToKeyName(a.keyURI) != a.keyURI {
+		if resp.GetName() != a.keyURI {
+			return nil, fmt.Errorf("the requested key name %q does not match the key name in the KMS response %q", a.keyURI, resp.GetName())
+		}
+	} else if keyVersionToKeyName(resp.GetName()) != a.keyURI {
 		return nil, fmt.Errorf("the requested key name %q does not match the key name in the KMS response %q", a.keyURI, resp.GetName())
 	}
 	if resp.CiphertextCrc32C.GetValue() != computeChecksum(resp.Ciphertext) {
@@ -109,4 +113,17 @@ func (w *aeadWithContextWrapper) Encrypt(plaintext, associatedData []byte) ([]by
 
 func (w *aeadWithContextWrapper) Decrypt(ciphertext, associatedData []byte) ([]byte, error) {
 	return w.DecryptWithContext(context.TODO(), ciphertext, associatedData)
+}
+
+// keyVersionToKeyName converts a Cloud KMS CryptoKeyVersion resource name into
+// a CryptoKey resource name by stripping the trailing "/cryptoKeyVersions/<v>"
+// segments. If keyVersion does not match the CryptoKeyVersion format, it is
+// returned unmodified.
+func keyVersionToKeyName(keyVersion string) string {
+	if !kmsKeyNameRegex.MatchString(keyVersion) {
+		return keyVersion
+	}
+	// Use LastIndex rather than strings.Cut in case an earlier segment
+	// (such as a keyRing or cryptoKey ID) is named "cryptoKeyVersions".
+	return keyVersion[:strings.LastIndex(keyVersion, "/cryptoKeyVersions/")]
 }

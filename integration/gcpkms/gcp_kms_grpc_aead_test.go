@@ -248,6 +248,108 @@ func TestGRPCEncrypt_Success(t *testing.T) {
 	}
 }
 
+func TestGRPCEncrypt_KeyNameVerification(t *testing.T) {
+	const keyName = "projects/p/locations/us/keyRings/r/cryptoKeys/prod"
+	const keyVersionName = keyName + "/cryptoKeyVersions/1"
+	ciphertext := []byte("ciphertext")
+	ciphertextCrc32c := int64(crc32.Checksum(ciphertext, crc32.MakeTable(crc32.Castagnoli)))
+
+	testcases := []struct {
+		name         string
+		requestedKey string
+		responseName string
+		wantErr      bool
+	}{
+		{
+			name:         "crypto_key_matches_returned_version",
+			requestedKey: keyName,
+			responseName: keyVersionName,
+			wantErr:      false,
+		},
+		{
+			name:         "crypto_key_matches_exact_name",
+			requestedKey: keyName,
+			responseName: keyName,
+			wantErr:      false,
+		},
+		{
+			name:         "sibling_crypto_key_version_sharing_prefix_rejected",
+			requestedKey: keyName,
+			responseName: keyName + "-other/cryptoKeyVersions/1",
+			wantErr:      true,
+		},
+		{
+			name:         "sibling_crypto_key_sharing_prefix_rejected",
+			requestedKey: keyName,
+			responseName: keyName + "-other",
+			wantErr:      true,
+		},
+		{
+			name:         "empty_crypto_key_version_segment_rejected",
+			requestedKey: keyName,
+			responseName: keyName + "/cryptoKeyVersions/",
+			wantErr:      true,
+		},
+		{
+			name:         "different_keyring_rejected",
+			requestedKey: keyName,
+			responseName: "projects/p/locations/us/keyRings/other/cryptoKeys/prod/cryptoKeyVersions/1",
+			wantErr:      true,
+		},
+		{
+			name:         "crypto_key_version_exact_match",
+			requestedKey: keyVersionName,
+			responseName: keyVersionName,
+			wantErr:      false,
+		},
+		{
+			name:         "crypto_key_version_sibling_prefix_rejected",
+			requestedKey: keyVersionName,
+			responseName: keyVersionName + "0",
+			wantErr:      true,
+		},
+		{
+			name:         "crypto_key_version_different_version_rejected",
+			requestedKey: keyVersionName,
+			responseName: keyName + "/cryptoKeyVersions/2",
+			wantErr:      true,
+		},
+		{
+			name:         "crypto_key_named_cryptoKeyVersions_matches_returned_version",
+			requestedKey: "projects/p/locations/us/keyRings/r/cryptoKeys/cryptoKeyVersions",
+			responseName: "projects/p/locations/us/keyRings/r/cryptoKeys/cryptoKeyVersions/cryptoKeyVersions/1",
+			wantErr:      false,
+		},
+		{
+			name:         "partial_prefix_before_earlier_cryptoKeyVersions_segment_rejected",
+			requestedKey: "projects/p/locations/us/keyRings",
+			responseName: "projects/p/locations/us/keyRings/cryptoKeyVersions/cryptoKeys/other/cryptoKeyVersions/1",
+			wantErr:      true,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := initializeGRPCClientWithResponse(t, &kmspb.EncryptResponse{
+				Name:                    tc.responseName,
+				Ciphertext:              ciphertext,
+				CiphertextCrc32C:        wrapperspb.Int64(ciphertextCrc32c),
+				VerifiedPlaintextCrc32C: true,
+				VerifiedAdditionalAuthenticatedDataCrc32C: true,
+			}, nil)
+
+			aead := newGRPCAEAD(tc.requestedKey, client)
+			_, err := aead.EncryptWithContext(t.Context(), []byte("plaintext"), []byte("additional data"))
+			if tc.wantErr && err == nil {
+				t.Errorf("aead.EncryptWithContext() err = nil, want error (requested %q, response %q)", tc.requestedKey, tc.responseName)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("aead.EncryptWithContext() err = %v, want nil (requested %q, response %q)", err, tc.requestedKey, tc.responseName)
+			}
+		})
+	}
+}
+
 func TestGRPCDecrypt_FailsWithInvalidPlaintextCrc32c(t *testing.T) {
 	testcases := []struct {
 		name            string
