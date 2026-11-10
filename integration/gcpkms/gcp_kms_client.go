@@ -52,10 +52,9 @@ const (
 
 // Client represents a GCP KMS client.
 type Client struct {
-	prefixKeyName     string
-	isCompleteKeyName bool
-	restKMS           *cloudkms.Service
-	grpcKMS           *kms.KeyManagementClient
+	keyURIPrefix string
+	restKMS      *cloudkms.Service
+	grpcKMS      *kms.KeyManagementClient
 }
 
 var _ registry.KMSClient = (*Client)(nil)
@@ -66,8 +65,7 @@ var _ registry.KMSClient = (*Client)(nil)
 //
 //	gcp-kms://[path]
 func NewClient(ctx context.Context, uriPrefix string, opts ...Option) (*Client, error) {
-	prefixKeyName, ok := trimGCPPrefix(uriPrefix)
-	if !ok {
+	if !strings.HasPrefix(strings.ToLower(uriPrefix), gcpPrefix) {
 		return nil, fmt.Errorf("uriPrefix must start with %s", gcpPrefix)
 	}
 	var o options
@@ -81,10 +79,7 @@ func NewClient(ctx context.Context, uriPrefix string, opts ...Option) (*Client, 
 
 	o.apiOptions = append(o.apiOptions, option.WithUserAgent(tinkUserAgent))
 
-	c := &Client{
-		prefixKeyName:     prefixKeyName,
-		isCompleteKeyName: isCompleteKeyName(prefixKeyName),
-	}
+	c := &Client{keyURIPrefix: uriPrefix}
 
 	switch o.transport {
 	case TransportGRPC:
@@ -115,10 +110,7 @@ func GetAEADWithContext(ctx context.Context, keyURI string, opts ...Option) (tin
 	if c.grpcKMS == nil {
 		return nil, errors.New("AEADWithContext is only supported when using GRPC")
 	}
-	keyName, ok := trimGCPPrefix(keyURI)
-	if !ok {
-		return nil, fmt.Errorf("keyURI must start with %s", gcpPrefix)
-	}
+	keyName := strings.TrimPrefix(keyURI, gcpPrefix)
 	return newGRPCAEAD(keyName, c.grpcKMS), nil
 }
 
@@ -168,27 +160,8 @@ func NewClientWithOptions(ctx context.Context, uriPrefix string, opts ...option.
 }
 
 // Supported returns true if this client does support keyURI.
-//
-// If the client was created with a full CryptoKey or CryptoKeyVersion URI,
-// keyURI must refer to that exact key resource. Otherwise, keyURI must match
-// the client's configured URI prefix on a "/" segment boundary.
 func (c *Client) Supported(keyURI string) bool {
-	// Reject zero-value Clients, whose empty prefixKeyName is otherwise
-	// indistinguishable from NewClient(ctx, "gcp-kms://").
-	if c.grpcKMS == nil && c.restKMS == nil {
-		return false
-	}
-	keyName, ok := trimGCPPrefix(keyURI)
-	if !ok {
-		return false
-	}
-	if c.prefixKeyName == "" {
-		return true
-	}
-	if c.isCompleteKeyName {
-		return keyName == c.prefixKeyName
-	}
-	return keyName == c.prefixKeyName || strings.HasPrefix(keyName, strings.TrimSuffix(c.prefixKeyName, "/")+"/")
+	return strings.HasPrefix(keyURI, c.keyURIPrefix)
 }
 
 // GetAEAD gets an AEAD backend by keyURI.
@@ -197,10 +170,7 @@ func (c *Client) GetAEAD(keyURI string) (tink.AEAD, error) {
 		return nil, errors.New("unsupported keyURI")
 	}
 
-	keyName, ok := trimGCPPrefix(keyURI)
-	if !ok {
-		return nil, errors.New("unsupported keyURI")
-	}
+	keyName := strings.TrimPrefix(keyURI, gcpPrefix)
 
 	switch {
 	case c.grpcKMS != nil:
@@ -218,24 +188,4 @@ func (c *Client) Close() error {
 		return c.grpcKMS.Close()
 	}
 	return nil
-}
-
-// trimGCPPrefix strips a leading "gcp-kms://" prefix (matched
-// case-insensitively) from uri, returning the remaining path with its original
-// casing preserved and true. Otherwise, it returns "", false.
-func trimGCPPrefix(uri string) (string, bool) {
-	if len(uri) < len(gcpPrefix) || !strings.EqualFold(uri[:len(gcpPrefix)], gcpPrefix) {
-		return "", false
-	}
-	return uri[len(gcpPrefix):], true
-}
-
-// isCompleteKeyName reports whether keyName is a full Cloud KMS CryptoKey or
-// CryptoKeyVersion resource name:
-//   - projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>
-//   - projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>/cryptoKeyVersions/<v>
-func isCompleteKeyName(keyName string) bool {
-	// validateKMSKeyName requires a CryptoKeyVersion suffix, so append a
-	// placeholder version in the second check to match CryptoKey names.
-	return validateKMSKeyName(keyName) == nil || validateKMSKeyName(keyName+"/cryptoKeyVersions/1") == nil
 }
